@@ -1,20 +1,21 @@
 import React from 'react';
 import { View, Text, StyleSheet, Pressable, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, spacing, radii, typography } from '../theme/colors';
 
 export default function AdminHeader({
   title = "B'Smart Admin",
   hasNotificationBadge = true,
   notificationCount = 0,
-  onMenuPress,
   onNotificationPress,
 }) {
+  const insets = useSafeAreaInsets();
+
   return (
-    <View style={styles.container}>
-      <Pressable hitSlop={12} onPress={onMenuPress} style={styles.iconBtn}>
-        <Ionicons name="menu-outline" size={26} color={colors.navy} />
-      </Pressable>
+    <View style={[styles.container, { paddingTop: insets.top, height: 56 + insets.top }]}>
+      {/* Left spacer for balanced layout */}
+      <View style={styles.spacer} />
 
       <View style={styles.titleWrap}>
         <Image
@@ -45,7 +46,6 @@ export default function AdminHeader({
 
 const styles = StyleSheet.create({
   container: {
-    height: 56,
     backgroundColor: colors.card,
     flexDirection: 'row',
     alignItems: 'center',
@@ -54,8 +54,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.cardBorder,
   },
+  spacer: {
+    width: 32,
+    height: 32,
+  },
   iconBtn: {
-    padding: spacing.xs,
+    width: 32,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -6,6 +6,7 @@ import OrdersScreen from '../screens/OrdersScreen';
 import AddProductScreen from '../screens/AddProductScreen';
 import EditProductScreen from '../screens/EditProductScreen';
 import CustomTabBar from '../components/CustomTabBar';
+import { colors } from '../theme/colors';
 
 export default function AppNavigator() {
   const [activeTab, setActiveTab] = useState('Overview');
@@ -58,8 +59,10 @@ export default function AppNavigator() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: colors.background,
   },
   screenContainer: {
     flex: 1,
   },
 });
+

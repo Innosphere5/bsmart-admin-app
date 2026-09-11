@@ -10,7 +10,7 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { categories, classGroups, schoolsList } from '../data/mockData';
@@ -18,6 +18,8 @@ import { colors, radii, spacing, typography } from '../theme/colors';
 import { uploadImageToCloudinary, updateProduct, deleteProduct } from '../services/api';
 
 export default function EditProductScreen({ navigation, product }) {
+  const insets = useSafeAreaInsets();
+
   if (!product) {
     return (
       <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -266,9 +268,9 @@ export default function EditProductScreen({ navigation, product }) {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.safeArea} edges={['left', 'right']}>
       {/* Top Header Navigation Bar */}
-      <View style={styles.headerBar}>
+      <View style={[styles.headerBar, { paddingTop: insets.top, height: 54 + insets.top }]}>
         <Pressable
           style={styles.backTouch}
           onPress={() => navigation?.navigate('Inventory')}

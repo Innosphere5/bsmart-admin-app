@@ -211,7 +211,7 @@ export default function OrdersScreen({ navigation }) {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.safeArea} edges={['left', 'right']}>
       <AdminHeader
         title="B'Smart Orders"
         notificationCount={unreadCount}
