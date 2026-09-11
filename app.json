@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "frontend",
+    "name": "B'Smart Admin",
     "slug": "frontend",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -10,20 +10,24 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#fed73a"
     },
     "ios": {
       "supportsTablet": true
     },
     "android": {
+      "package": "com.bsmart.admin",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#fed73a"
       },
       "edgeToEdgeEnabled": true
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "apiUrl": "https://admin-app-backend-i5tk.onrender.com"
     }
   }
 }
