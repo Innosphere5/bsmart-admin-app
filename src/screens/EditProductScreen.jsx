@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { categories, classGroups, schoolsList } from '../data/mockData';
 import { colors, radii, spacing, typography } from '../theme/colors';
-import { uploadImageToCloudinary, updateProduct, deleteProduct } from '../services/api';
+import { uploadImageToCloudinary, updateProduct, deleteProduct, fetchCategories, createCategory, fetchSchools, createSchool } from '../services/api';
 
 export default function EditProductScreen({ navigation, product }) {
   const insets = useSafeAreaInsets();
@@ -36,36 +36,63 @@ export default function EditProductScreen({ navigation, product }) {
   const [productName, setProductName] = useState(product.name || '');
   const [selectedCategory, setSelectedCategory] = useState(product.category || '');
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
+  const [categoryList, setCategoryList] = useState(categories);
+  const [isCustomCategory, setIsCustomCategory] = useState(false);
+  const [customCategoryInput, setCustomCategoryInput] = useState('');
   const [description, setDescription] = useState(product.details || product.description || '');
   const [price, setPrice] = useState(String(product.basePrice || 400));
   const [stockQuantity, setStockQuantity] = useState(String(product.stockQuantity ?? 50));
+  const [schools, setSchools] = useState(schoolsList);
   const [schoolQuery, setSchoolQuery] = useState(product.school || '');
   const [showSchoolDropdown, setShowSchoolDropdown] = useState(false);
+  const [isAddingNewSchool, setIsAddingNewSchool] = useState(false);
+  const [newSchoolInput, setNewSchoolInput] = useState('');
+
+  // Dynamically load persisted categories and schools
+  useEffect(() => {
+    async function loadDynamicMetadata() {
+      try {
+        const [remoteCats, remoteSchools] = await Promise.all([fetchCategories(), fetchSchools()]);
+        if (remoteCats && Array.isArray(remoteCats) && remoteCats.length > 0) {
+          setCategoryList((prev) => Array.from(new Set([...prev, ...remoteCats])));
+        }
+        if (remoteSchools && Array.isArray(remoteSchools) && remoteSchools.length > 0) {
+          setSchools((prev) => Array.from(new Set([...prev, ...remoteSchools])));
+        }
+      } catch (err) {
+        console.warn('Could not sync dynamic categories/schools:', err.message);
+      }
+    }
+    loadDynamicMetadata();
+  }, []);
 
   // Initialize selected class pill
-  const initialClassId = classGroups.find((c) => c.label === product.applicableClass)?.id || '2';
+  const initialClassId = classGroups.find((c) => c.label === product.applicableClass)?.id || '5';
   const [selectedClass, setSelectedClass] = useState(initialClassId);
 
   // Size-Price row builder state
   const [sizePricePairs, setSizePricePairs] = useState(() => {
+    const existingStocks = product.sizeStocks || {};
     if (product.sizePrices && Object.keys(product.sizePrices).length > 0) {
       return Object.entries(product.sizePrices).map(([sz, pr]) => ({
         size: String(sz),
         price: String(pr),
+        stock: String(existingStocks[sz] !== undefined ? existingStocks[sz] : (product.stockQuantity ?? 10)),
       }));
     } else if (Array.isArray(product.sizes) && product.sizes.length > 0) {
       return product.sizes.map((sz) => ({
         size: String(sz),
         price: String(product.basePrice || 400),
+        stock: String(existingStocks[sz] !== undefined ? existingStocks[sz] : (product.stockQuantity ?? 10)),
       }));
     }
     return [
-      { size: '26', price: '400' },
-      { size: '28', price: '420' },
-      { size: '30', price: '450' },
-      { size: '32', price: '480' },
-      { size: '34', price: '510' },
-      { size: '36', price: '540' },
+      { size: '26', price: '400', stock: '10' },
+      { size: '28', price: '420', stock: '10' },
+      { size: '30', price: '450', stock: '10' },
+      { size: '32', price: '480', stock: '10' },
+      { size: '34', price: '510', stock: '10' },
+      { size: '36', price: '540', stock: '10' },
     ];
   });
 
@@ -81,9 +108,9 @@ export default function EditProductScreen({ navigation, product }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Size Price Pair Row Handlers
+  // Size Price & Stock Pair Row Handlers
   const handleAddPairRow = () => {
-    setSizePricePairs((prev) => [...prev, { size: '', price: '' }]);
+    setSizePricePairs((prev) => [...prev, { size: '', price: '', stock: '10' }]);
   };
 
   const handleUpdatePairRow = (index, field, value) => {
@@ -101,20 +128,20 @@ export default function EditProductScreen({ navigation, product }) {
   const handleApplyPreset = (presetType) => {
     if (presetType === 'standard') {
       setSizePricePairs([
-        { size: '26', price: '400' },
-        { size: '28', price: '420' },
-        { size: '30', price: '450' },
-        { size: '32', price: '480' },
-        { size: '34', price: '510' },
-        { size: '36', price: '540' },
+        { size: '26', price: '400', stock: '10' },
+        { size: '28', price: '420', stock: '10' },
+        { size: '30', price: '450', stock: '10' },
+        { size: '32', price: '480', stock: '10' },
+        { size: '34', price: '510', stock: '10' },
+        { size: '36', price: '540', stock: '10' },
       ]);
     } else if (presetType === 'senior') {
       setSizePricePairs([
-        { size: '28', price: '649' },
-        { size: '30', price: '699' },
-        { size: '32', price: '749' },
-        { size: '34', price: '799' },
-        { size: '36', price: '849' },
+        { size: '28', price: '649', stock: '10' },
+        { size: '30', price: '699', stock: '10' },
+        { size: '32', price: '749', stock: '10' },
+        { size: '34', price: '799', stock: '10' },
+        { size: '36', price: '849', stock: '10' },
       ]);
     }
   };
@@ -167,6 +194,16 @@ export default function EditProductScreen({ navigation, product }) {
       return;
     }
 
+    const finalCategory = (isCustomCategory && customCategoryInput.trim())
+      ? customCategoryInput.trim()
+      : (selectedCategory.trim() || product.category || 'General');
+
+    // Persist custom category or new school asynchronously
+    createCategory(finalCategory).catch(() => {});
+    if (schoolQuery.trim()) {
+      createSchool(schoolQuery.trim()).catch(() => {});
+    }
+
     try {
       setIsSubmitting(true);
       const selectedClassObj = classGroups.find((c) => c.id === selectedClass);
@@ -178,21 +215,29 @@ export default function EditProductScreen({ navigation, product }) {
       const validPairs = sizePricePairs.filter((p) => p.size.trim() !== '');
       const sizes = [];
       const sizePrices = {};
+      const sizeStocks = {};
       const formattedPills = [];
 
       for (const pair of validPairs) {
         const sz = pair.size.trim();
         const pr = parseFloat(pair.price) || parseFloat(price) || 400;
+        const stk = parseInt(pair.stock, 10);
+        const validStk = isNaN(stk) ? 10 : Math.max(0, stk);
         sizes.push(sz);
         sizePrices[sz] = pr;
-        formattedPills.push(`${sz} (₹${pr})`);
+        sizeStocks[sz] = validStk;
+        formattedPills.push(`${sz} (₹${pr}, Qty: ${validStk})`);
       }
 
       if (sizes.length === 0) {
         sizes.push('26', '28', '30', '32', '34', '36');
         sizePrices['26'] = 400; sizePrices['28'] = 420; sizePrices['30'] = 450;
         sizePrices['32'] = 480; sizePrices['34'] = 510; sizePrices['36'] = 540;
+        sizes.forEach((s) => { sizeStocks[s] = 10; });
       }
+
+      const totalStockFromSizes = Object.values(sizeStocks).reduce((a, b) => a + b, 0);
+      const computedStock = totalStockFromSizes > 0 ? totalStockFromSizes : (parseInt(stockQuantity, 10) || 50);
 
       const priceValues = Object.values(sizePrices);
       const minPrice = priceValues.length > 0 ? Math.min(...priceValues) : parseFloat(price) || 400;
@@ -205,17 +250,18 @@ export default function EditProductScreen({ navigation, product }) {
 
       const updatePayload = {
         name: productName.trim(),
-        category: selectedCategory || product.category || 'General',
+        category: finalCategory,
         school: schoolQuery.trim() || product.school || 'General School',
         applicableClass: selectedClassObj ? selectedClassObj.label : product.applicableClass || 'All Classes',
         description: description.trim(),
         details: description.trim(),
         basePrice: minPrice,
-        stockQuantity: parseInt(stockQuantity, 10) || 50,
+        stockQuantity: computedStock,
         images: finalImages,
         imageSrc: finalImages[0],
         sizes: sizes,
         sizePrices: sizePrices,
+        sizeStocks: sizeStocks,
         sizesText: cleanSizesText,
       };
 
@@ -304,38 +350,105 @@ export default function EditProductScreen({ navigation, product }) {
           </View>
 
           <View style={styles.fieldGroup}>
-            <Text style={styles.label}>
-              Category <Text style={styles.requiredStar}>*</Text>
-            </Text>
-            <Pressable
-              style={styles.dropdownSelect}
-              onPress={() => setShowCategoryPicker(!showCategoryPicker)}
-            >
-              <Text style={styles.dropdownSelectText}>
-                {selectedCategory || 'Select Category'}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <Text style={styles.label}>
+                Category <Text style={styles.requiredStar}>*</Text>
               </Text>
-              <Ionicons
-                name={showCategoryPicker ? 'chevron-up' : 'chevron-down'}
-                size={18}
-                color={colors.textMuted}
-              />
-            </Pressable>
+              <Pressable
+                onPress={() => {
+                  setIsCustomCategory(!isCustomCategory);
+                  setShowCategoryPicker(false);
+                }}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE' }}
+              >
+                <Ionicons name={isCustomCategory ? "list-outline" : "create-outline"} size={13} color="#1D4ED8" />
+                <Text style={{ fontSize: 11, fontWeight: '800', color: '#1D4ED8' }}>
+                  {isCustomCategory ? "Choose from List" : "✍️ Write Custom"}
+                </Text>
+              </Pressable>
+            </View>
 
-            {showCategoryPicker && (
-              <View style={styles.dropdownList}>
-                {categories.map((cat) => (
-                  <Pressable
-                    key={cat}
-                    style={styles.dropdownItem}
-                    onPress={() => {
-                      setSelectedCategory(cat);
-                      setShowCategoryPicker(false);
-                    }}
-                  >
-                    <Text style={styles.dropdownItemText}>{cat}</Text>
-                  </Pressable>
-                ))}
+            {isCustomCategory ? (
+              <View style={{ gap: 8 }}>
+                <TextInput
+                  style={[styles.textInput, { borderColor: '#3B82F6', backgroundColor: '#F8FAFC' }]}
+                  placeholder="Type custom category name (e.g. Scarf, Tracksuit, Jersey)..."
+                  placeholderTextColor={colors.textMuted}
+                  value={customCategoryInput}
+                  onChangeText={(val) => {
+                    setCustomCategoryInput(val);
+                    setSelectedCategory(val);
+                  }}
+                />
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text style={{ fontSize: 11, color: colors.textMuted }}>
+                    {selectedCategory ? `Active: "${selectedCategory}"` : 'Type any custom category'}
+                  </Text>
+                  {customCategoryInput.trim().length > 0 && (
+                    <Pressable
+                      style={{ backgroundColor: colors.navy, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 }}
+                      onPress={() => {
+                        const trimmed = customCategoryInput.trim();
+                        if (!categoryList.includes(trimmed)) {
+                          setCategoryList((prev) => [trimmed, ...prev]);
+                          createCategory(trimmed).catch(() => {});
+                        }
+                        setSelectedCategory(trimmed);
+                        Alert.alert('Category Ready', `"${trimmed}" set as product category.`);
+                      }}
+                    >
+                      <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '800' }}>Save Category</Text>
+                    </Pressable>
+                  )}
+                </View>
               </View>
+            ) : (
+              <>
+                <Pressable
+                  style={styles.dropdownSelect}
+                  onPress={() => setShowCategoryPicker(!showCategoryPicker)}
+                >
+                  <Text style={styles.dropdownSelectText}>
+                    {selectedCategory || 'Select Category'}
+                  </Text>
+                  <Ionicons
+                    name={showCategoryPicker ? 'chevron-up' : 'chevron-down'}
+                    size={18}
+                    color={colors.textMuted}
+                  />
+                </Pressable>
+
+                {showCategoryPicker && (
+                  <View style={styles.dropdownList}>
+                    {/* Direct Write New Category Button inside dropdown */}
+                    <Pressable
+                      style={[styles.dropdownItem, { backgroundColor: '#F0FDF4', borderBottomWidth: 1, borderBottomColor: '#DCFCE7' }]}
+                      onPress={() => {
+                        setShowCategoryPicker(false);
+                        setIsCustomCategory(true);
+                      }}
+                    >
+                      <Ionicons name="add-circle" size={16} color="#16A34A" />
+                      <Text style={[styles.dropdownItemText, { color: '#16A34A', fontWeight: '800' }]}>
+                        ➕ Write / Create New Category...
+                      </Text>
+                    </Pressable>
+
+                    {categoryList.map((cat) => (
+                      <Pressable
+                        key={cat}
+                        style={styles.dropdownItem}
+                        onPress={() => {
+                          setSelectedCategory(cat);
+                          setShowCategoryPicker(false);
+                        }}
+                      >
+                        <Text style={styles.dropdownItemText}>{cat}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
+              </>
             )}
           </View>
 
@@ -401,67 +514,143 @@ export default function EditProductScreen({ navigation, product }) {
             </Pressable>
           </View>
 
-          {/* Row-by-Row Pair Inputs */}
+          {/* Row-by-Row Size Price & Stock Inputs */}
           <View style={styles.pairRowsContainer}>
-            {sizePricePairs.map((pair, idx) => (
-              <View key={idx} style={styles.pairRowItem}>
-                <View style={styles.pairInputCol}>
-                  <Text style={styles.pairFieldLabel}>Size Name</Text>
-                  <TextInput
-                    style={styles.pairTextInput}
-                    placeholder="Size (e.g. 26)"
-                    placeholderTextColor={colors.textMuted}
-                    value={pair.size}
-                    onChangeText={(val) => handleUpdatePairRow(idx, 'size', val)}
-                  />
-                </View>
+            {sizePricePairs.map((pair, idx) => {
+              const numStock = parseInt(pair.stock, 10);
+              const isLowStock = !isNaN(numStock) && numStock <= 2 && pair.stock.trim() !== '';
+              return (
+                <View key={idx} style={[styles.pairRowItem, isLowStock && { borderColor: '#FCA5A5', backgroundColor: '#FFF5F5' }]}>
+                  <View style={styles.pairInputCol}>
+                    <Text style={styles.pairFieldLabel}>Size Name</Text>
+                    <TextInput
+                      style={styles.pairTextInput}
+                      placeholder="Size (e.g. 26)"
+                      placeholderTextColor={colors.textMuted}
+                      value={pair.size}
+                      onChangeText={(val) => handleUpdatePairRow(idx, 'size', val)}
+                    />
+                  </View>
 
-                <View style={styles.pairInputCol}>
-                  <Text style={styles.pairFieldLabel}>Rate (₹)</Text>
-                  <TextInput
-                    style={styles.pairTextInput}
-                    placeholder="Rate (e.g. 400)"
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="numeric"
-                    value={pair.price}
-                    onChangeText={(val) => handleUpdatePairRow(idx, 'price', val)}
-                  />
-                </View>
+                  <View style={styles.pairInputCol}>
+                    <Text style={styles.pairFieldLabel}>Rate (₹)</Text>
+                    <TextInput
+                      style={styles.pairTextInput}
+                      placeholder="Rate (e.g. 400)"
+                      placeholderTextColor={colors.textMuted}
+                      keyboardType="numeric"
+                      value={pair.price}
+                      onChangeText={(val) => handleUpdatePairRow(idx, 'price', val)}
+                    />
+                  </View>
 
-                <Pressable
-                  style={styles.removeRowBtn}
-                  onPress={() => handleRemovePairRow(idx)}
-                >
-                  <Ionicons name="trash-outline" size={18} color={colors.red} />
-                </Pressable>
-              </View>
-            ))}
+                  <View style={styles.pairInputCol}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+                      <Text style={styles.pairFieldLabel}>Stock/Qty</Text>
+                      {isLowStock && (
+                        <Text style={{ fontSize: 9, fontWeight: '800', color: colors.red }}>Low ≤2</Text>
+                      )}
+                    </View>
+                    <TextInput
+                      style={[
+                        styles.pairTextInput,
+                        isLowStock && { borderColor: colors.red, backgroundColor: '#FEF2F2', color: colors.red }
+                      ]}
+                      placeholder="Qty (e.g. 10)"
+                      placeholderTextColor={colors.textMuted}
+                      keyboardType="numeric"
+                      value={pair.stock}
+                      onChangeText={(val) => handleUpdatePairRow(idx, 'stock', val)}
+                    />
+                  </View>
+
+                  <Pressable
+                    style={styles.removeRowBtn}
+                    onPress={() => handleRemovePairRow(idx)}
+                  >
+                    <Ionicons name="trash-outline" size={18} color={colors.red} />
+                  </Pressable>
+                </View>
+              );
+            })}
           </View>
 
           <Pressable style={styles.addPairRowBtn} onPress={handleAddPairRow}>
             <Ionicons name="add-circle" size={20} color={colors.navy} />
-            <Text style={styles.addPairRowBtnText}>+ Add Custom Size &amp; Price Row</Text>
+            <Text style={styles.addPairRowBtnText}>+ Add Custom Size, Price &amp; Stock Row</Text>
           </Pressable>
 
           {/* Website Preview */}
           <View style={styles.previewBox}>
-            <Text style={styles.previewTitle}>Live Website Rate Preview:</Text>
+            <Text style={styles.previewTitle}>Live Website Rate &amp; Stock Preview:</Text>
             <View style={styles.previewChipsContainer}>
               {sizePricePairs
                 .filter((p) => p.size.trim() !== '')
-                .map((pair, idx) => (
-                  <View key={idx} style={styles.sizePriceChip}>
-                    <Text style={styles.sizeChipKey}>Size {pair.size}</Text>
-                    <Text style={styles.sizeChipPrice}>₹{pair.price || '0'}</Text>
-                  </View>
-                ))}
+                .map((pair, idx) => {
+                  const numStock = parseInt(pair.stock, 10);
+                  const isLow = !isNaN(numStock) && numStock <= 2 && pair.stock.trim() !== '';
+                  return (
+                    <View key={idx} style={[styles.sizePriceChip, isLow && { borderColor: '#F87171', backgroundColor: '#FEF2F2' }]}>
+                      <Text style={styles.sizeChipKey}>Size {pair.size}</Text>
+                      <Text style={styles.sizeChipPrice}>₹{pair.price || '0'}</Text>
+                      <Text style={{ fontSize: 10, fontWeight: '800', color: isLow ? colors.red : '#4B5563' }}>
+                        {isLow ? `⚠️ Low: ${pair.stock || '0'}` : `Qty: ${pair.stock || '0'}`}
+                      </Text>
+                    </View>
+                  );
+                })}
             </View>
           </View>
         </View>
 
         {/* Card 3: School & Target */}
         <View style={styles.formCard}>
-          <Text style={styles.sectionHeader}>SCHOOL & TARGET</Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={styles.sectionHeader}>SCHOOL &amp; TARGET</Text>
+            <Pressable
+              onPress={() => setIsAddingNewSchool(!isAddingNewSchool)}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#FDE68A' }}
+            >
+              <Ionicons name={isAddingNewSchool ? "close" : "add-circle-outline"} size={13} color="#B45309" />
+              <Text style={{ fontSize: 11, fontWeight: '800', color: '#B45309' }}>
+                {isAddingNewSchool ? "Cancel" : "➕ Add New School"}
+              </Text>
+            </Pressable>
+          </View>
+
+          {/* Explicit Add New School Form */}
+          {isAddingNewSchool && (
+            <View style={{ marginVertical: 10, padding: 12, backgroundColor: '#FFFBEB', borderRadius: 10, borderWidth: 1, borderColor: '#FDE68A', gap: 8 }}>
+              <Text style={{ fontSize: 12, fontWeight: '800', color: '#92400E' }}>Create &amp; Register New School:</Text>
+              <TextInput
+                style={[styles.textInput, { backgroundColor: '#FFFFFF' }]}
+                placeholder="e.g. Cambridge International School, Bathinda"
+                placeholderTextColor={colors.textMuted}
+                value={newSchoolInput}
+                onChangeText={setNewSchoolInput}
+              />
+              <Pressable
+                style={{ backgroundColor: '#D97706', paddingVertical: 9, borderRadius: 8, alignItems: 'center' }}
+                onPress={() => {
+                  const trimmed = newSchoolInput.trim();
+                  if (!trimmed) {
+                    Alert.alert('School Name Required', 'Please enter a school name.');
+                    return;
+                  }
+                  if (!schools.includes(trimmed)) {
+                    setSchools((prev) => [trimmed, ...prev]);
+                    createSchool(trimmed).catch(() => {});
+                  }
+                  setSchoolQuery(trimmed);
+                  setNewSchoolInput('');
+                  setIsAddingNewSchool(false);
+                  Alert.alert('School Added 🎉', `"${trimmed}" added and selected for product.`);
+                }}
+              >
+                <Text style={{ color: '#FFFFFF', fontWeight: '800', fontSize: 12 }}>+ Add &amp; Select School</Text>
+              </Pressable>
+            </View>
+          )}
 
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>Associated School *</Text>
@@ -469,7 +658,7 @@ export default function EditProductScreen({ navigation, product }) {
               <Ionicons name="search" size={18} color={colors.textMuted} />
               <TextInput
                 style={styles.searchInput}
-                placeholder="Search school name..."
+                placeholder="Search or select school name..."
                 placeholderTextColor={colors.textMuted}
                 value={schoolQuery}
                 onChangeText={(q) => {
@@ -480,7 +669,28 @@ export default function EditProductScreen({ navigation, product }) {
             </View>
             {showSchoolDropdown && (
               <View style={styles.dropdownList}>
-                {schoolsList
+                {/* Instant "Add as New School" button if query doesn't match an existing school */}
+                {schoolQuery.trim().length > 0 && !schools.some((s) => s.toLowerCase() === schoolQuery.trim().toLowerCase()) && (
+                  <Pressable
+                    style={[styles.dropdownItem, { backgroundColor: '#FEF3C7', borderBottomWidth: 1, borderBottomColor: '#FDE68A' }]}
+                    onPress={() => {
+                      const trimmed = schoolQuery.trim();
+                      if (!schools.includes(trimmed)) {
+                        setSchools((prev) => [trimmed, ...prev]);
+                        createSchool(trimmed).catch(() => {});
+                      }
+                      setSchoolQuery(trimmed);
+                      setShowSchoolDropdown(false);
+                      Alert.alert('New School Added 🎉', `"${trimmed}" registered and selected!`);
+                    }}
+                  >
+                    <Ionicons name="add-circle" size={16} color="#D97706" />
+                    <Text style={[styles.dropdownItemText, { color: '#B45309', fontWeight: '800' }]}>
+                      ➕ Add "{schoolQuery.trim()}" as New School
+                    </Text>
+                  </Pressable>
+                )}
+                {schools
                   .filter((s) => s.toLowerCase().includes(schoolQuery.toLowerCase()))
                   .map((school) => (
                     <Pressable

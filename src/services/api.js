@@ -345,4 +345,76 @@ export function getRealtimeStreamUrl() {
   return `${API_BASE_URL}/api/realtime/stream`;
 }
 
+/**
+ * Fetch categories dynamically from backend
+ */
+export async function fetchCategories() {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/categories`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && Array.isArray(data.categories)) {
+        return data.categories;
+      }
+    }
+  } catch (e) {
+    console.warn('Could not fetch categories from server:', e.message);
+  }
+  return null;
+}
+
+/**
+ * Save new category to backend
+ */
+export async function createCategory(category) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/categories`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category }),
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    console.warn('Could not persist category to server:', e.message);
+  }
+}
+
+/**
+ * Fetch schools dynamically from backend
+ */
+export async function fetchSchools() {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/schools`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && Array.isArray(data.schools)) {
+        return data.schools;
+      }
+    }
+  } catch (e) {
+    console.warn('Could not fetch schools from server:', e.message);
+  }
+  return null;
+}
+
+/**
+ * Save new school to backend
+ */
+export async function createSchool(school) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/schools`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ school }),
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    console.warn('Could not persist school to server:', e.message);
+  }
+}
+
 

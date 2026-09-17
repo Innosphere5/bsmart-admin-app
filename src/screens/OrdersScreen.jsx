@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AdminHeader from '../components/AdminHeader';
 import StatusBadge from '../components/StatusBadge';
+import { OrdersSkeletonList } from '../components/Skeleton';
 import { colors, radii, spacing, typography } from '../theme/colors';
 import { fetchOrders, updateOrderStatus, getOrderPdfUrl, fetchNotifications, getRealtimeStreamUrl } from '../services/api';
 
@@ -287,10 +288,7 @@ export default function OrdersScreen({ navigation }) {
 
         {/* Orders List */}
         {loading ? (
-          <View style={styles.centerContainer}>
-            <ActivityIndicator size="large" color={colors.navy} />
-            <Text style={styles.loadingText}>Loading Orders...</Text>
-          </View>
+          <OrdersSkeletonList count={5} />
         ) : filteredOrders.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Ionicons name="bag-handle-outline" size={48} color={colors.textMuted} />

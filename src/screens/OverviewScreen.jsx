@@ -30,7 +30,7 @@ export default function OverviewScreen({ navigation }) {
         setTotalProducts(items.length);
         const low = items.filter((p) => {
           const qty = Number(p.stockQuantity ?? 50);
-          return qty < 15 || p.stock === 'low' || p.inStock === false;
+          return (qty > 0 && qty <= 2) || p.stock === 'low' || p.inStock === false;
         }).length;
         setLowStockCount(low);
       }

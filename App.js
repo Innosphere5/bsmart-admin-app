@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import * as Updates from 'expo-updates';
 
 import AppNavigator from './src/navigation/AppNavigator';
 
@@ -43,6 +44,22 @@ const errStyles = StyleSheet.create({
 });
 
 export default function App() {
+  useEffect(() => {
+    async function checkUpdate() {
+      if (__DEV__) return;
+      try {
+        const update = await Updates.checkForUpdateAsync();
+        if (update.isAvailable) {
+          await Updates.fetchUpdateAsync();
+          await Updates.reloadAsync();
+        }
+      } catch (e) {
+        console.log('Update check error:', e);
+      }
+    }
+    checkUpdate();
+  }, []);
+
   return (
     <ErrorBoundary>
       <SafeAreaProvider>

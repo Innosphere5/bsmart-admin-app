@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import StatusBadge from '../components/StatusBadge';
+import { ProductsSkeletonList } from '../components/Skeleton';
 import { colors, radii, spacing, typography } from '../theme/colors';
 import { fetchProducts } from '../services/api';
 
@@ -96,10 +97,7 @@ export default function InventoryScreen({ navigation }) {
         </View>
 
         {loading ? (
-          <View style={styles.loadingBox}>
-            <ActivityIndicator size="large" color={colors.navy} />
-            <Text style={styles.loadingText}>Fetching inventory from database...</Text>
-          </View>
+          <ProductsSkeletonList count={6} />
         ) : filteredItems.length === 0 ? (
           <View style={styles.emptyCard}>
             <Ionicons name="cube-outline" size={48} color={colors.textMuted} />
@@ -112,7 +110,7 @@ export default function InventoryScreen({ navigation }) {
               const stock = item.stockQuantity ?? 50;
               let status = 'In Stock';
               if (stock === 0) status = 'Out of Stock';
-              else if (stock < 15) status = 'Low Stock';
+              else if (stock <= 2) status = 'Low Stock';
 
               const imageUri =
                 item.imageSrc || item.images?.[0] || 'https://images.unsplash.com/photo-1544441893-675973e31985?w=600';
