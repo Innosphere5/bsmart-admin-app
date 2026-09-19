@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { categories, classGroups, schoolsList } from '../data/mockData';
 import { colors, radii, spacing, typography } from '../theme/colors';
-import { uploadImageToCloudinary, updateProduct, deleteProduct, fetchCategories, createCategory, fetchSchools, createSchool } from '../services/api';
+import { uploadImageToCloudinary, updateProduct, deleteProduct, fetchCategories, createCategory, fetchSchools, createSchool, fetchClasses } from '../services/api';
 
 export default function EditProductScreen({ navigation, product }) {
   const insets = useSafeAreaInsets();
@@ -47,28 +47,41 @@ export default function EditProductScreen({ navigation, product }) {
   const [showSchoolDropdown, setShowSchoolDropdown] = useState(false);
   const [isAddingNewSchool, setIsAddingNewSchool] = useState(false);
   const [newSchoolInput, setNewSchoolInput] = useState('');
-
-  // Dynamically load persisted categories and schools
-  useEffect(() => {
-    async function loadDynamicMetadata() {
-      try {
-        const [remoteCats, remoteSchools] = await Promise.all([fetchCategories(), fetchSchools()]);
-        if (remoteCats && Array.isArray(remoteCats) && remoteCats.length > 0) {
-          setCategoryList((prev) => Array.from(new Set([...prev, ...remoteCats])));
-        }
-        if (remoteSchools && Array.isArray(remoteSchools) && remoteSchools.length > 0) {
-          setSchools((prev) => Array.from(new Set([...prev, ...remoteSchools])));
-        }
-      } catch (err) {
-        console.warn('Could not sync dynamic categories/schools:', err.message);
-      }
-    }
-    loadDynamicMetadata();
-  }, []);
+  const [classes, setClasses] = useState(classGroups);
 
   // Initialize selected class pill
   const initialClassId = classGroups.find((c) => c.label === product.applicableClass)?.id || '5';
   const [selectedClass, setSelectedClass] = useState(initialClassId);
+
+  // Dynamically load persisted categories, schools, and classes
+  useEffect(() => {
+    async function loadDynamicMetadata() {
+      try {
+        const [remoteCats, remoteSchools, remoteClasses] = await Promise.all([
+          fetchCategories(),
+          fetchSchools(),
+          fetchClasses(),
+        ]);
+        if (remoteCats && Array.isArray(remoteCats) && remoteCats.length > 0) {
+          setCategoryList(remoteCats);
+        }
+        if (remoteSchools && Array.isArray(remoteSchools) && remoteSchools.length > 0) {
+          setSchools(remoteSchools);
+        }
+        if (remoteClasses && Array.isArray(remoteClasses) && remoteClasses.length > 0) {
+          const mapped = remoteClasses.map((cls, idx) => ({ id: String(idx + 1), label: cls }));
+          setClasses(mapped);
+          const matched = mapped.find((c) => c.label === product.applicableClass);
+          if (matched) {
+            setSelectedClass(matched.id);
+          }
+        }
+      } catch (err) {
+        console.warn('Could not sync dynamic categories/schools/classes:', err.message);
+      }
+    }
+    loadDynamicMetadata();
+  }, [product.applicableClass]);
 
   // Size-Price row builder state
   const [sizePricePairs, setSizePricePairs] = useState(() => {
@@ -206,7 +219,7 @@ export default function EditProductScreen({ navigation, product }) {
 
     try {
       setIsSubmitting(true);
-      const selectedClassObj = classGroups.find((c) => c.id === selectedClass);
+      const selectedClassObj = classes.find((c) => c.id === selectedClass) || classGroups.find((c) => c.id === selectedClass);
       
       const finalImages = images.length > 0 ? images : [
         product.imageSrc || 'https://images.unsplash.com/photo-1544441893-675973e31985?w=600'
@@ -354,18 +367,27 @@ export default function EditProductScreen({ navigation, product }) {
               <Text style={styles.label}>
                 Category <Text style={styles.requiredStar}>*</Text>
               </Text>
-              <Pressable
-                onPress={() => {
-                  setIsCustomCategory(!isCustomCategory);
-                  setShowCategoryPicker(false);
-                }}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE' }}
-              >
-                <Ionicons name={isCustomCategory ? "list-outline" : "create-outline"} size={13} color="#1D4ED8" />
-                <Text style={{ fontSize: 11, fontWeight: '800', color: '#1D4ED8' }}>
-                  {isCustomCategory ? "Choose from List" : "✍️ Write Custom"}
-                </Text>
-              </Pressable>
+              <View style={{ flexDirection: 'row', gap: 6 }}>
+                <Pressable
+                  onPress={() => navigation?.navigate?.('ManageMasters')}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#FDE68A' }}
+                >
+                  <Ionicons name="settings-outline" size={13} color="#B45309" />
+                  <Text style={{ fontSize: 11, fontWeight: '800', color: '#B45309' }}>⚙️ Manage</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    setIsCustomCategory(!isCustomCategory);
+                    setShowCategoryPicker(false);
+                  }}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE' }}
+                >
+                  <Ionicons name={isCustomCategory ? "list-outline" : "create-outline"} size={13} color="#1D4ED8" />
+                  <Text style={{ fontSize: 11, fontWeight: '800', color: '#1D4ED8' }}>
+                    {isCustomCategory ? "Choose from List" : "✍️ Write Custom"}
+                  </Text>
+                </Pressable>
+              </View>
             </View>
 
             {isCustomCategory ? (
@@ -711,7 +733,7 @@ export default function EditProductScreen({ navigation, product }) {
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>Applicable Class</Text>
             <View style={styles.pillGroup}>
-              {classGroups.map((cls) => {
+              {classes.map((cls) => {
                 const isSelected = selectedClass === cls.id;
                 return (
                   <Pressable

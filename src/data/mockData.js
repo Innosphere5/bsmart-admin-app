@@ -162,11 +162,20 @@ export const schoolsList = [
 
 export const classGroups = [
   { id: '1', label: 'NURSERY - KG' },
-  { id: '2', label: 'I - II' },
-  { id: '3', label: 'III - V' },
-  { id: '4', label: 'I - V' },
-  { id: '5', label: 'VI - VIII' },
-  { id: '6', label: 'VI - X' },
-  { id: '7', label: 'IX - X' },
-  { id: '8', label: 'XI - XII' },
+  { id: '2', label: 'NUR - II' },
+  { id: '3', label: 'NUR - V' },
+  { id: '4', label: 'NUR - X' },
+  { id: '5', label: 'I - II' },
+  { id: '6', label: 'III - V' },
+  { id: '7', label: 'I - V' },
+  { id: '8', label: 'I - VIII' },
+  { id: '9', label: 'I - X' },
+  { id: '10', label: 'VI - VIII' },
+  { id: '11', label: 'VI - X' },
+  { id: '12', label: 'IX - X' },
+  { id: '13', label: 'XI - XII' },
+  { id: '14', label: 'All Classes' },
 ];
+
+export const classesList = classGroups.map((c) => c.label);
+

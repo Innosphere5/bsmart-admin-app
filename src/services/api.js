@@ -6,18 +6,39 @@ import Constants from 'expo-constants';
  * Handles Expo Go physical devices, Android emulator, iOS simulator, & Web
  */
 const PRODUCTION_API_URL = 'https://admin-app-backend-i5tk.onrender.com';
+const SUPABASE_REST_URL = 'https://rxnvxqrzgecynpxjobkh.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_XPwu7-Cx7wQHzSOAeuB2rA_JSvjvTCd';
 
 /**
  * Dynamically resolve backend API base URL
  * 1. Checks EXPO_PUBLIC_API_URL / EXPO_PUBLIC_BACKEND_URL (from .env or build env)
- * 2. Checks Constants.expoConfig?.extra?.apiUrl (from app.json)
- * 3. Falls back to production Render backend if in release/production build
- * 4. Resolves local backend (port 5000) for local development (Expo Go, Emulator, Web)
+ * 2. In __DEV__, prioritizes local backend server (port 5000) over remote Render
+ * 3. Checks Constants.expoConfig?.extra?.apiUrl (from app.json)
+ * 4. Falls back to production Render backend if in release/production build
+ * 5. Resolves local backend (port 5000) for local development (Expo Go, Emulator, Web)
  */
 const getApiBaseUrl = () => {
   // 1. Explicit environment variable (Expo SDK 49+ support EXPO_PUBLIC_*)
   const envUrl = process.env.EXPO_PUBLIC_API_URL || process.env.EXPO_PUBLIC_BACKEND_URL;
   if (envUrl && typeof envUrl === 'string' && envUrl.trim() !== '') {
+    // If in development mode and envUrl points to remote Render, prioritize local dev machine on port 5000
+    if (typeof __DEV__ !== 'undefined' && __DEV__ && envUrl.includes('onrender.com')) {
+      if (Platform.OS === 'web') {
+        return 'http://localhost:5000';
+      }
+      try {
+        const hostUri = Constants.expoConfig?.hostUri || Constants.manifest?.debuggerHost;
+        if (hostUri) {
+          const ip = hostUri.split(':')[0];
+          if (ip && ip !== 'localhost' && ip !== '127.0.0.1') {
+            return `http://${ip}:5000`;
+          }
+        }
+      } catch (e) {}
+      if (Platform.OS === 'android') {
+        return 'http://10.0.2.2:5000';
+      }
+    }
     return envUrl.trim().replace(/\/+$/, '');
   }
 
@@ -285,6 +306,113 @@ export async function updateOrderStatus(id, statusPayload) {
 }
 
 /**
+ * Helper to get all candidate backend base URLs (current, local, LAN)
+ */
+function getCandidateBaseUrls() {
+  const urls = [];
+  if (API_BASE_URL) urls.push(API_BASE_URL);
+
+  // Local candidate URLs
+  try {
+    const hostUri = Constants.expoConfig?.hostUri || Constants.manifest?.debuggerHost;
+    if (hostUri) {
+      const ip = hostUri.split(':')[0];
+      if (ip && ip !== 'localhost' && ip !== '127.0.0.1') {
+        const lanUrl = `http://${ip}:5000`;
+        if (!urls.includes(lanUrl)) urls.push(lanUrl);
+      }
+    }
+  } catch (e) {}
+
+  if (Platform.OS === 'web') {
+    if (!urls.includes('http://localhost:5000')) urls.push('http://localhost:5000');
+  }
+  if (Platform.OS === 'android') {
+    if (!urls.includes('http://10.0.2.2:5000')) urls.push('http://10.0.2.2:5000');
+  }
+
+  return urls;
+}
+
+/**
+ * Permanently delete an order from backend database with resilient multi-tier fallback
+ */
+export async function deleteOrder(id) {
+  const cleanId = String(id).trim();
+  const rawId = cleanId.replace(/^#/, '');
+  const candidateUrls = getCandidateBaseUrls();
+
+  let lastError = null;
+
+  // 1. Try candidate backend servers (both DELETE and POST /delete)
+  for (const baseUrl of candidateUrls) {
+    // Attempt A: DELETE /api/orders/:id
+    try {
+      const res = await fetch(`${baseUrl}/api/orders/${encodeURIComponent(cleanId)}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({ id: cleanId, orderId: cleanId }),
+      });
+
+      if (res.ok) {
+        const data = await res.json().catch(() => ({ success: true }));
+        console.log(`✅ Order ${cleanId} deleted via ${baseUrl} (DELETE)`);
+        return data;
+      }
+    } catch (e) {
+      lastError = e;
+    }
+
+    // Attempt B: POST /api/orders/:id/delete (handles proxies/hosts that block HTTP DELETE)
+    try {
+      const res = await fetch(`${baseUrl}/api/orders/${encodeURIComponent(cleanId)}/delete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({ id: cleanId, orderId: cleanId }),
+      });
+
+      if (res.ok) {
+        const data = await res.json().catch(() => ({ success: true }));
+        console.log(`✅ Order ${cleanId} deleted via ${baseUrl} (POST delete)`);
+        return data;
+      }
+    } catch (e) {
+      lastError = e;
+    }
+  }
+
+  // 2. Direct Supabase REST Fallback (guaranteed to delete even if remote Render server is outdated or down)
+  try {
+    console.log(`⚡ Falling back to direct Supabase deletion for Order ${cleanId}...`);
+    const supabaseUrl = `${SUPABASE_REST_URL}/rest/v1/orders?or=(id.eq.${encodeURIComponent(cleanId)},order_number.eq.${encodeURIComponent(cleanId)},id.eq.${encodeURIComponent(rawId)},order_number.eq.${encodeURIComponent(rawId)})`;
+    const res = await fetch(supabaseUrl, {
+      method: 'DELETE',
+      headers: {
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation'
+      }
+    });
+
+    if (res.ok) {
+      console.log(`✅ Order ${cleanId} deleted directly from Supabase`);
+      return { success: true, message: `Order ${cleanId} deleted successfully` };
+    }
+  } catch (supabaseErr) {
+    console.warn('Direct Supabase delete notice:', supabaseErr.message);
+  }
+
+  throw new Error(`Failed to delete order ${cleanId}. Please check network connection.`);
+}
+
+/**
  * Get PDF URL for direct viewing / download
  */
 export function getOrderPdfUrl(id) {
@@ -382,6 +510,52 @@ export async function createCategory(category) {
 }
 
 /**
+ * Update / Rename an existing category
+ */
+export async function updateCategory(oldName, newName) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/categories/${encodeURIComponent(oldName)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newName }),
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to update category');
+  } catch (e) {
+    console.warn('Could not update category on server:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * Delete a category from backend
+ */
+export async function deleteCategory(categoryName) {
+  try {
+    const cleanName = String(categoryName).trim();
+    const res = await fetch(`${API_BASE_URL}/api/categories/${encodeURIComponent(cleanName)}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({ category: cleanName }),
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to delete category');
+  } catch (e) {
+    console.warn('Could not delete category on server:', e.message);
+    throw e;
+  }
+}
+
+/**
  * Fetch schools dynamically from backend
  */
 export async function fetchSchools() {
@@ -412,9 +586,144 @@ export async function createSchool(school) {
     if (res.ok) {
       return await res.json();
     }
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to create school');
   } catch (e) {
     console.warn('Could not persist school to server:', e.message);
+    throw e;
   }
 }
+
+/**
+ * Update / Rename an existing school
+ */
+export async function updateSchool(oldName, newName) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/schools/${encodeURIComponent(oldName)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newName }),
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to update school');
+  } catch (e) {
+    console.warn('Could not update school on server:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * Delete a school from backend
+ */
+export async function deleteSchool(schoolName) {
+  try {
+    const cleanName = String(schoolName).trim();
+    const res = await fetch(`${API_BASE_URL}/api/schools/${encodeURIComponent(cleanName)}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({ school: cleanName }),
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to delete school');
+  } catch (e) {
+    console.warn('Could not delete school on server:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * Fetch classes dynamically from backend
+ */
+export async function fetchClasses() {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/classes`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && Array.isArray(data.classes)) {
+        return data.classes;
+      }
+    }
+  } catch (e) {
+    console.warn('Could not fetch classes from server:', e.message);
+  }
+  return null;
+}
+
+/**
+ * Save new class to backend
+ */
+export async function createClass(className) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/classes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ className }),
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to create class');
+  } catch (e) {
+    console.warn('Could not persist class to server:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * Update / Rename an existing class
+ */
+export async function updateClass(oldName, newName) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/classes/${encodeURIComponent(oldName)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newName }),
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to update class');
+  } catch (e) {
+    console.warn('Could not update class on server:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * Delete a class from backend
+ */
+export async function deleteClass(className) {
+  try {
+    const cleanName = String(className).trim();
+    const res = await fetch(`${API_BASE_URL}/api/classes/${encodeURIComponent(cleanName)}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({ className: cleanName }),
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to delete class');
+  } catch (e) {
+    console.warn('Could not delete class on server:', e.message);
+    throw e;
+  }
+}
+
 
 

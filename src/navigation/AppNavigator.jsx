@@ -5,6 +5,7 @@ import InventoryScreen from '../screens/InventoryScreen';
 import OrdersScreen from '../screens/OrdersScreen';
 import AddProductScreen from '../screens/AddProductScreen';
 import EditProductScreen from '../screens/EditProductScreen';
+import ManageMastersScreen from '../screens/ManageMastersScreen';
 import CustomTabBar from '../components/CustomTabBar';
 import { colors } from '../theme/colors';
 
@@ -22,11 +23,12 @@ export default function AppNavigator() {
   };
 
   const stateMock = {
-    index: ['Overview', 'Inventory', 'Orders', 'AddProduct'].indexOf(activeTab),
+    index: ['Overview', 'Inventory', 'Orders', 'ManageMasters', 'AddProduct'].indexOf(activeTab),
     routes: [
       { name: 'Overview' },
       { name: 'Inventory' },
       { name: 'Orders' },
+      { name: 'ManageMasters' },
       { name: 'AddProduct' },
     ],
   };
@@ -39,6 +41,8 @@ export default function AppNavigator() {
         return <InventoryScreen navigation={navigationMock} />;
       case 'Orders':
         return <OrdersScreen navigation={navigationMock} />;
+      case 'ManageMasters':
+        return <ManageMastersScreen navigation={navigationMock} />;
       case 'AddProduct':
         return <AddProductScreen navigation={navigationMock} />;
       case 'EditProduct':

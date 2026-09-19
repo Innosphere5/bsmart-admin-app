@@ -18,7 +18,7 @@ import AdminHeader from '../components/AdminHeader';
 import StatusBadge from '../components/StatusBadge';
 import { OrdersSkeletonList } from '../components/Skeleton';
 import { colors, radii, spacing, typography } from '../theme/colors';
-import { fetchOrders, updateOrderStatus, getOrderPdfUrl, fetchNotifications, getRealtimeStreamUrl } from '../services/api';
+import { fetchOrders, updateOrderStatus, getOrderPdfUrl, fetchNotifications, getRealtimeStreamUrl, deleteOrder } from '../services/api';
 
 const STATUS_FILTERS = ['All', 'Pending', 'Accepted', 'Completed', 'Declined'];
 const DELIVERY_PRESETS = [
@@ -126,6 +126,16 @@ export default function OrdersScreen({ navigation }) {
           } catch (err) {}
         });
 
+        eventSource.addEventListener('order_deleted', (e) => {
+          try {
+            const data = JSON.parse(e.data);
+            const delId = String(data?.id || '');
+            setOrders((prev) => prev.filter((o) => String(o.id) !== delId && String(o.orderNumber) !== delId));
+            setSelectedOrder((prev) => (prev && (String(prev.id) === delId || String(prev.orderNumber) === delId) ? null : prev));
+            loadOrdersData();
+          } catch (err) {}
+        });
+
         eventSource.onopen = () => setIsLiveConnected(true);
       }
     } catch (e) {}
@@ -209,6 +219,41 @@ export default function OrdersScreen({ navigation }) {
     } finally {
       setActionLoading(false);
     }
+  };
+
+  const handleDeleteOrder = (order) => {
+    const orderToDel = order || selectedOrder;
+    if (!orderToDel) return;
+
+    const displayNum = orderToDel.orderNumber || orderToDel.id;
+    Alert.alert(
+      'Delete Order',
+      `Are you sure you want to permanently delete Order ${displayNum} for ${orderToDel.customerName || 'customer'}?\n\nThis will remove it from the system and cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Order',
+          style: 'destructive',
+          onPress: async () => {
+            setActionLoading(true);
+            try {
+              await deleteOrder(orderToDel.id);
+              setOrders((prev) => prev.filter((o) => o.id !== orderToDel.id && o.orderNumber !== orderToDel.orderNumber));
+              if (selectedOrder && (selectedOrder.id === orderToDel.id || selectedOrder.orderNumber === orderToDel.orderNumber)) {
+                setModalVisible(false);
+                setSelectedOrder(null);
+              }
+              Alert.alert('Order Deleted', `Order ${displayNum} was deleted successfully.`);
+              loadOrdersData();
+            } catch (err) {
+              Alert.alert('Delete Failed', err.message || 'Could not delete order.');
+            } finally {
+              setActionLoading(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   return (
@@ -383,6 +428,17 @@ export default function OrdersScreen({ navigation }) {
                         <Text style={styles.pdfBadgeText}>PDF</Text>
                       </Pressable>
 
+                      <Pressable
+                        style={[styles.pdfBadgeBtn, styles.deleteBadgeBtn]}
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          handleDeleteOrder(order);
+                        }}
+                      >
+                        <Ionicons name="trash-outline" size={13} color="#DC2626" />
+                        <Text style={styles.deleteBadgeText}>Delete</Text>
+                      </Pressable>
+
                       <View style={styles.viewLinkRow}>
                         <Text style={styles.viewLinkText}>Manage</Text>
                         <Ionicons name="chevron-forward" size={14} color={colors.navy} />
@@ -552,6 +608,16 @@ export default function OrdersScreen({ navigation }) {
                       </Text>
                     </View>
                   )}
+
+                  {/* Admin Delete Order Action */}
+                  <Pressable
+                    style={styles.modalDeleteBtn}
+                    onPress={() => handleDeleteOrder(selectedOrder)}
+                    disabled={actionLoading}
+                  >
+                    <Ionicons name="trash-outline" size={15} color="#DC2626" />
+                    <Text style={styles.modalDeleteBtnText}>Delete Order Record</Text>
+                  </Pressable>
                 </View>
               </>
             )}
@@ -1197,6 +1263,15 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#9F1239',
   },
+  deleteBadgeBtn: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
+  },
+  deleteBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#DC2626',
+  },
   viewLinkRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1436,6 +1511,23 @@ const styles = StyleSheet.create({
   statusFooterText: {
     fontSize: 12.5,
     color: colors.textSecondary,
+  },
+  modalDeleteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    marginTop: spacing.sm,
+    backgroundColor: '#FEF2F2',
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  modalDeleteBtnText: {
+    color: '#DC2626',
+    fontWeight: '700',
+    fontSize: 13,
   },
 
   // SubModal Styles

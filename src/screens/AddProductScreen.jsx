@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { categories, classGroups, schoolsList } from '../data/mockData';
 import { colors, radii, spacing, typography } from '../theme/colors';
-import { uploadImageToCloudinary, createProduct, fetchCategories, createCategory, fetchSchools, createSchool } from '../services/api';
+import { uploadImageToCloudinary, createProduct, fetchCategories, createCategory, fetchSchools, createSchool, fetchClasses } from '../services/api';
 import { parseSizePriceMapping } from '../utils/sizeParser';
 
 export default function AddProductScreen({ navigation }) {
@@ -42,25 +42,34 @@ export default function AddProductScreen({ navigation }) {
   const [showSchoolDropdown, setShowSchoolDropdown] = useState(false);
   const [isAddingNewSchool, setIsAddingNewSchool] = useState(false);
   const [newSchoolInput, setNewSchoolInput] = useState('');
+  const [classes, setClasses] = useState(classGroups);
   const [selectedClass, setSelectedClass] = useState('2');
 
   const [images, setImages] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Dynamically load persisted categories and schools
+  // Dynamically load persisted categories, schools, and classes
   useEffect(() => {
     async function loadDynamicMetadata() {
       try {
-        const [remoteCats, remoteSchools] = await Promise.all([fetchCategories(), fetchSchools()]);
+        const [remoteCats, remoteSchools, remoteClasses] = await Promise.all([
+          fetchCategories(),
+          fetchSchools(),
+          fetchClasses(),
+        ]);
         if (remoteCats && Array.isArray(remoteCats) && remoteCats.length > 0) {
-          setCategoryList((prev) => Array.from(new Set([...prev, ...remoteCats])));
+          setCategoryList(remoteCats);
         }
         if (remoteSchools && Array.isArray(remoteSchools) && remoteSchools.length > 0) {
-          setSchools((prev) => Array.from(new Set([...prev, ...remoteSchools])));
+          setSchools(remoteSchools);
+        }
+        if (remoteClasses && Array.isArray(remoteClasses) && remoteClasses.length > 0) {
+          const mapped = remoteClasses.map((cls, idx) => ({ id: String(idx + 1), label: cls }));
+          setClasses(mapped);
         }
       } catch (err) {
-        console.warn('Could not sync dynamic categories/schools:', err.message);
+        console.warn('Could not sync dynamic categories/schools/classes:', err.message);
       }
     }
     loadDynamicMetadata();
@@ -175,7 +184,7 @@ export default function AddProductScreen({ navigation }) {
 
     try {
       setIsSubmitting(true);
-      const selectedClassObj = classGroups.find((c) => c.id === selectedClass);
+      const selectedClassObj = classes.find((c) => c.id === selectedClass) || classGroups.find((c) => c.id === selectedClass);
 
       // Fallback image if user didn't pick custom image
       const finalImages = images.length > 0 ? images : [
@@ -295,18 +304,27 @@ export default function AddProductScreen({ navigation }) {
               <Text style={styles.label}>
                 Category <Text style={styles.requiredStar}>*</Text>
               </Text>
-              <Pressable
-                onPress={() => {
-                  setIsCustomCategory(!isCustomCategory);
-                  setShowCategoryPicker(false);
-                }}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE' }}
-              >
-                <Ionicons name={isCustomCategory ? "list-outline" : "create-outline"} size={13} color="#1D4ED8" />
-                <Text style={{ fontSize: 11, fontWeight: '800', color: '#1D4ED8' }}>
-                  {isCustomCategory ? "Choose from List" : "✍️ Write Custom"}
-                </Text>
-              </Pressable>
+              <View style={{ flexDirection: 'row', gap: 6 }}>
+                <Pressable
+                  onPress={() => navigation?.navigate?.('ManageMasters')}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#FDE68A' }}
+                >
+                  <Ionicons name="settings-outline" size={13} color="#B45309" />
+                  <Text style={{ fontSize: 11, fontWeight: '800', color: '#B45309' }}>⚙️ Manage</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    setIsCustomCategory(!isCustomCategory);
+                    setShowCategoryPicker(false);
+                  }}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE' }}
+                >
+                  <Ionicons name={isCustomCategory ? "list-outline" : "create-outline"} size={13} color="#1D4ED8" />
+                  <Text style={{ fontSize: 11, fontWeight: '800', color: '#1D4ED8' }}>
+                    {isCustomCategory ? "Choose from List" : "✍️ Write Custom"}
+                  </Text>
+                </Pressable>
+              </View>
             </View>
 
             {isCustomCategory ? (
@@ -545,15 +563,24 @@ export default function AddProductScreen({ navigation }) {
         <View style={styles.formCard}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text style={styles.sectionHeader}>SCHOOL / INSTITUTION</Text>
-            <Pressable
-              onPress={() => setIsAddingNewSchool(!isAddingNewSchool)}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#FDE68A' }}
-            >
-              <Ionicons name={isAddingNewSchool ? "close" : "add-circle-outline"} size={13} color="#B45309" />
-              <Text style={{ fontSize: 11, fontWeight: '800', color: '#B45309' }}>
-                {isAddingNewSchool ? "Cancel" : "➕ Add New School"}
-              </Text>
-            </Pressable>
+            <View style={{ flexDirection: 'row', gap: 6 }}>
+              <Pressable
+                onPress={() => navigation?.navigate?.('ManageMasters')}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#D1D5DB' }}
+              >
+                <Ionicons name="settings-outline" size={13} color="#374151" />
+                <Text style={{ fontSize: 11, fontWeight: '800', color: '#374151' }}>⚙️ Manage</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setIsAddingNewSchool(!isAddingNewSchool)}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#FDE68A' }}
+              >
+                <Ionicons name={isAddingNewSchool ? "close" : "add-circle-outline"} size={13} color="#B45309" />
+                <Text style={{ fontSize: 11, fontWeight: '800', color: '#B45309' }}>
+                  {isAddingNewSchool ? "Cancel" : "➕ Add New School"}
+                </Text>
+              </Pressable>
+            </View>
           </View>
 
           {/* Explicit Add New School Form */}
@@ -651,7 +678,7 @@ export default function AddProductScreen({ navigation }) {
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>Applicable Classes</Text>
             <View style={styles.pillGroup}>
-              {classGroups.map((cls) => {
+              {classes.map((cls) => {
                 const isSelected = selectedClass === cls.id;
                 return (
                   <Pressable

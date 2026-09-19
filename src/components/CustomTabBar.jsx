@@ -8,7 +8,8 @@ const tabs = [
   { name: 'Dashboard', route: 'Overview', icon: 'grid-outline', activeIcon: 'grid' },
   { name: 'Inventory', route: 'Inventory', icon: 'cube-outline', activeIcon: 'cube' },
   { name: 'Orders', route: 'Orders', icon: 'cart-outline', activeIcon: 'cart' },
-  { name: 'Add Product', route: 'AddProduct', icon: 'add-circle-outline', activeIcon: 'add-circle' },
+  { name: 'Masters', route: 'ManageMasters', icon: 'school-outline', activeIcon: 'school' },
+  { name: 'Add', route: 'AddProduct', icon: 'add-circle-outline', activeIcon: 'add-circle' },
 ];
 
 export default function CustomTabBar({ state, navigation }) {
