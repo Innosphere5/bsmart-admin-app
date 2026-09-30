@@ -7,12 +7,15 @@ export default function StatusBadge({ status }) {
     switch (status?.toLowerCase()) {
       case 'pending':
         return { bg: colors.status.pendingBg, text: colors.status.pendingText };
+      case 'accepted':
       case 'ready':
       case 'confirmed':
         return { bg: colors.status.readyBg, text: colors.status.readyText };
+      case 'completed':
       case 'delivered':
       case 'in stock':
         return { bg: colors.status.deliveredBg, text: colors.status.deliveredText };
+      case 'declined':
       case 'cancelled':
       case 'out of stock':
         return { bg: colors.status.cancelledBg, text: colors.status.cancelledText };

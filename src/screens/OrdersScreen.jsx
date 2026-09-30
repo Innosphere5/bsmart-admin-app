@@ -20,7 +20,7 @@ import { OrdersSkeletonList } from '../components/Skeleton';
 import { colors, radii, spacing, typography } from '../theme/colors';
 import { fetchOrders, updateOrderStatus, getOrderPdfUrl, fetchNotifications, getRealtimeStreamUrl, deleteOrder } from '../services/api';
 
-const STATUS_FILTERS = ['All', 'Pending', 'Accepted', 'Completed', 'Declined'];
+const STATUS_FILTERS = ['All', 'Pending', 'Accepted', 'Completed', 'Declined', 'Cancelled'];
 const DELIVERY_PRESETS = [
   'Within 45 mins',
   'Today by 4:00 PM',
