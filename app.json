@@ -21,8 +21,7 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#fed73a"
-      },
-      "edgeToEdgeEnabled": false
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -35,7 +34,8 @@
     },
     "plugins": [
       "expo-font",
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-updates"
     ],
     "runtimeVersion": {
       "policy": "appVersion"

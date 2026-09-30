@@ -474,255 +474,520 @@ export function getRealtimeStreamUrl() {
 }
 
 /**
- * Fetch categories dynamically from backend
+ * Helper: Direct Supabase REST fetch of Master Registry
  */
-export async function fetchCategories() {
+async function fetchMasterRegistryDirectFromSupabase() {
   try {
-    const res = await fetch(`${API_BASE_URL}/api/categories`);
+    const url = `${SUPABASE_REST_URL}/rest/v1/notifications?id=eq.sys_master_registry&select=message`;
+    const res = await fetch(url, {
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+    });
     if (res.ok) {
       const data = await res.json();
-      if (data.success && Array.isArray(data.categories)) {
-        return data.categories;
+      if (Array.isArray(data) && data.length > 0 && data[0].message) {
+        return JSON.parse(data[0].message);
       }
     }
   } catch (e) {
-    console.warn('Could not fetch categories from server:', e.message);
+    console.warn('Direct Supabase master fetch warning:', e.message);
   }
   return null;
 }
 
 /**
- * Save new category to backend
+ * Helper: Direct Supabase REST save/update of Master Registry
+ */
+async function saveMasterRegistryDirectToSupabase(modifierFn) {
+  try {
+    let current = await fetchMasterRegistryDirectFromSupabase();
+    if (!current || typeof current !== 'object') {
+      current = {
+        schools: [],
+        classes: [],
+        categories: [],
+        deletedSchools: [],
+        deletedClasses: [],
+        deletedCategories: [],
+      };
+    }
+
+    const updated = modifierFn(current);
+    const payload = {
+      id: 'sys_master_registry',
+      order_id: 'SYSTEM',
+      type: 'system_masters',
+      title: 'System Master Registry',
+      message: JSON.stringify({
+        ...updated,
+        updatedAt: new Date().toISOString(),
+      }),
+      target_role: 'system',
+      read: true,
+      created_at: new Date().toISOString(),
+    };
+
+    await fetch(`${SUPABASE_REST_URL}/rest/v1/notifications`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=merge-duplicates',
+      },
+      body: JSON.stringify(payload),
+    });
+    return updated;
+  } catch (e) {
+    console.warn('Direct Supabase master save warning:', e.message);
+  }
+  return null;
+}
+
+/**
+ * Fetch categories dynamically from backend with direct Supabase fallback
+ */
+export async function fetchCategories() {
+  const candidateUrls = getCandidateBaseUrls();
+  for (const url of candidateUrls) {
+    try {
+      const res = await fetch(`${url}/api/categories`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.categories)) {
+          return data.categories;
+        }
+      }
+    } catch (e) {}
+  }
+
+  const direct = await fetchMasterRegistryDirectFromSupabase();
+  if (direct && Array.isArray(direct.categories)) {
+    const deleted = new Set((direct.deletedCategories || []).map((c) => String(c).trim().toLowerCase()));
+    return direct.categories.filter((c) => c && !deleted.has(String(c).trim().toLowerCase()));
+  }
+
+  return null;
+}
+
+/**
+ * Save new category to backend and Supabase directly
  */
 export async function createCategory(category) {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/categories`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ category }),
-    });
-    if (res.ok) {
-      return await res.json();
-    }
-  } catch (e) {
-    console.warn('Could not persist category to server:', e.message);
+  const cleanName = String(category).trim();
+  const candidateUrls = getCandidateBaseUrls();
+
+  for (const url of candidateUrls) {
+    try {
+      const res = await fetch(`${url}/api/categories`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category: cleanName }),
+      });
+      if (res.ok) break;
+    } catch (e) {}
   }
+
+  await saveMasterRegistryDirectToSupabase((reg) => {
+    const lower = cleanName.toLowerCase();
+    const categories = (reg.categories || []).filter((c) => c.trim().toLowerCase() !== lower);
+    categories.push(cleanName);
+    const deletedCategories = (reg.deletedCategories || []).filter((c) => c.trim().toLowerCase() !== lower);
+    return { ...reg, categories, deletedCategories };
+  });
+
+  return { success: true, category: cleanName };
 }
 
 /**
  * Update / Rename an existing category
  */
 export async function updateCategory(oldName, newName) {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/categories/${encodeURIComponent(oldName)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ newName }),
-    });
-    if (res.ok) {
-      return await res.json();
-    }
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || 'Failed to update category');
-  } catch (e) {
-    console.warn('Could not update category on server:', e.message);
-    throw e;
+  const cleanOld = String(oldName).trim();
+  const cleanNew = String(newName).trim();
+  const candidateUrls = getCandidateBaseUrls();
+
+  for (const url of candidateUrls) {
+    try {
+      const res = await fetch(`${url}/api/categories/${encodeURIComponent(cleanOld)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newName: cleanNew }),
+      });
+      if (res.ok) break;
+    } catch (e) {}
   }
+
+  await saveMasterRegistryDirectToSupabase((reg) => {
+    const lowerOld = cleanOld.toLowerCase();
+    const lowerNew = cleanNew.toLowerCase();
+    let categories = (reg.categories || []).filter((c) => c.trim().toLowerCase() !== lowerOld);
+    if (!categories.some((c) => c.trim().toLowerCase() === lowerNew)) {
+      categories.push(cleanNew);
+    }
+    let deletedCategories = (reg.deletedCategories || []).filter((c) => c.trim().toLowerCase() !== lowerNew);
+    if (!deletedCategories.some((c) => c.trim().toLowerCase() === lowerOld)) {
+      deletedCategories.push(cleanOld);
+    }
+    return { ...reg, categories, deletedCategories };
+  });
+
+  // Direct Supabase product category update
+  try {
+    await fetch(`${SUPABASE_REST_URL}/rest/v1/products?category=ilike.${encodeURIComponent(cleanOld)}`, {
+      method: 'PATCH',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ category: cleanNew }),
+    });
+  } catch (e) {}
+
+  return { success: true, oldName: cleanOld, newName: cleanNew };
 }
 
 /**
- * Delete a category from backend
+ * Delete a category from backend and Supabase directly
  */
 export async function deleteCategory(categoryName) {
-  try {
-    const cleanName = String(categoryName).trim();
-    const res = await fetch(`${API_BASE_URL}/api/categories/${encodeURIComponent(cleanName)}`, {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      body: JSON.stringify({ category: cleanName }),
-    });
-    if (res.ok) {
-      return await res.json();
-    }
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || 'Failed to delete category');
-  } catch (e) {
-    console.warn('Could not delete category on server:', e.message);
-    throw e;
+  const cleanName = String(categoryName).trim();
+  const candidateUrls = getCandidateBaseUrls();
+
+  for (const url of candidateUrls) {
+    try {
+      const res = await fetch(`${url}/api/categories/${encodeURIComponent(cleanName)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ category: cleanName }),
+      });
+      if (res.ok) break;
+    } catch (e) {}
   }
+
+  await saveMasterRegistryDirectToSupabase((reg) => {
+    const lower = cleanName.toLowerCase();
+    const categories = (reg.categories || []).filter((c) => c.trim().toLowerCase() !== lower);
+    const deletedCategories = reg.deletedCategories || [];
+    if (!deletedCategories.some((c) => c.trim().toLowerCase() === lower)) {
+      deletedCategories.push(cleanName);
+    }
+    return { ...reg, categories, deletedCategories };
+  });
+
+  // Reset category to 'General' in Supabase products
+  try {
+    await fetch(`${SUPABASE_REST_URL}/rest/v1/products?category=ilike.${encodeURIComponent(cleanName)}`, {
+      method: 'PATCH',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ category: 'General' }),
+    });
+  } catch (e) {}
+
+  return { success: true, deleted: cleanName };
 }
 
 /**
- * Fetch schools dynamically from backend
+ * Fetch schools dynamically from backend with direct Supabase fallback
  */
 export async function fetchSchools() {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/schools`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.success && Array.isArray(data.schools)) {
-        return data.schools;
+  const candidateUrls = getCandidateBaseUrls();
+  for (const url of candidateUrls) {
+    try {
+      const res = await fetch(`${url}/api/schools`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.schools)) {
+          return data.schools;
+        }
       }
-    }
-  } catch (e) {
-    console.warn('Could not fetch schools from server:', e.message);
+    } catch (e) {}
   }
+
+  const direct = await fetchMasterRegistryDirectFromSupabase();
+  if (direct && Array.isArray(direct.schools)) {
+    const deleted = new Set((direct.deletedSchools || []).map((s) => String(s).trim().toLowerCase()));
+    return direct.schools.filter((s) => s && !deleted.has(String(s).trim().toLowerCase()));
+  }
+
   return null;
 }
 
 /**
- * Save new school to backend
+ * Save new school to backend and Supabase directly
  */
 export async function createSchool(school) {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/schools`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ school }),
-    });
-    if (res.ok) {
-      return await res.json();
-    }
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || 'Failed to create school');
-  } catch (e) {
-    console.warn('Could not persist school to server:', e.message);
-    throw e;
+  const cleanName = String(school).trim();
+  const candidateUrls = getCandidateBaseUrls();
+
+  for (const url of candidateUrls) {
+    try {
+      const res = await fetch(`${url}/api/schools`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school: cleanName }),
+      });
+      if (res.ok) break;
+    } catch (e) {}
   }
+
+  await saveMasterRegistryDirectToSupabase((reg) => {
+    const lower = cleanName.toLowerCase();
+    const schools = (reg.schools || []).filter((s) => s.trim().toLowerCase() !== lower);
+    schools.push(cleanName);
+    const deletedSchools = (reg.deletedSchools || []).filter((s) => s.trim().toLowerCase() !== lower);
+    return { ...reg, schools, deletedSchools };
+  });
+
+  return { success: true, school: cleanName };
 }
 
 /**
- * Update / Rename an existing school
+ * Update / Rename an existing school in backend and Supabase directly
  */
 export async function updateSchool(oldName, newName) {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/schools/${encodeURIComponent(oldName)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ newName }),
-    });
-    if (res.ok) {
-      return await res.json();
-    }
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || 'Failed to update school');
-  } catch (e) {
-    console.warn('Could not update school on server:', e.message);
-    throw e;
+  const cleanOld = String(oldName).trim();
+  const cleanNew = String(newName).trim();
+  const candidateUrls = getCandidateBaseUrls();
+
+  for (const url of candidateUrls) {
+    try {
+      const res = await fetch(`${url}/api/schools/${encodeURIComponent(cleanOld)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newName: cleanNew }),
+      });
+      if (res.ok) break;
+    } catch (e) {}
   }
+
+  await saveMasterRegistryDirectToSupabase((reg) => {
+    const lowerOld = cleanOld.toLowerCase();
+    const lowerNew = cleanNew.toLowerCase();
+    let schools = (reg.schools || []).filter((s) => s.trim().toLowerCase() !== lowerOld);
+    if (!schools.some((s) => s.trim().toLowerCase() === lowerNew)) {
+      schools.push(cleanNew);
+    }
+    let deletedSchools = (reg.deletedSchools || []).filter((s) => s.trim().toLowerCase() !== lowerNew);
+    if (!deletedSchools.some((s) => s.trim().toLowerCase() === lowerOld)) {
+      deletedSchools.push(cleanOld);
+    }
+    return { ...reg, schools, deletedSchools };
+  });
+
+  // Direct Supabase product school update
+  try {
+    await fetch(`${SUPABASE_REST_URL}/rest/v1/products?school=ilike.${encodeURIComponent(cleanOld)}`, {
+      method: 'PATCH',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ school: cleanNew }),
+    });
+  } catch (e) {}
+
+  return { success: true, oldName: cleanOld, newName: cleanNew };
 }
 
 /**
- * Delete a school from backend
+ * Delete a school from backend and Supabase directly
  */
 export async function deleteSchool(schoolName) {
-  try {
-    const cleanName = String(schoolName).trim();
-    const res = await fetch(`${API_BASE_URL}/api/schools/${encodeURIComponent(cleanName)}`, {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      body: JSON.stringify({ school: cleanName }),
-    });
-    if (res.ok) {
-      return await res.json();
-    }
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || 'Failed to delete school');
-  } catch (e) {
-    console.warn('Could not delete school on server:', e.message);
-    throw e;
+  const cleanName = String(schoolName).trim();
+  const candidateUrls = getCandidateBaseUrls();
+
+  for (const url of candidateUrls) {
+    try {
+      const res = await fetch(`${url}/api/schools/${encodeURIComponent(cleanName)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ school: cleanName }),
+      });
+      if (res.ok) break;
+    } catch (e) {}
   }
+
+  await saveMasterRegistryDirectToSupabase((reg) => {
+    const lower = cleanName.toLowerCase();
+    const schools = (reg.schools || []).filter((s) => s.trim().toLowerCase() !== lower);
+    const deletedSchools = reg.deletedSchools || [];
+    if (!deletedSchools.some((s) => s.trim().toLowerCase() === lower)) {
+      deletedSchools.push(cleanName);
+    }
+    return { ...reg, schools, deletedSchools };
+  });
+
+  // Reset school to 'General School' in Supabase products
+  try {
+    await fetch(`${SUPABASE_REST_URL}/rest/v1/products?school=ilike.${encodeURIComponent(cleanName)}`, {
+      method: 'PATCH',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ school: 'General School' }),
+    });
+  } catch (e) {}
+
+  return { success: true, deleted: cleanName };
 }
 
 /**
- * Fetch classes dynamically from backend
+ * Fetch classes dynamically from backend with direct Supabase fallback
  */
 export async function fetchClasses() {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/classes`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.success && Array.isArray(data.classes)) {
-        return data.classes;
+  const candidateUrls = getCandidateBaseUrls();
+  for (const url of candidateUrls) {
+    try {
+      const res = await fetch(`${url}/api/classes`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.classes)) {
+          return data.classes;
+        }
       }
-    }
-  } catch (e) {
-    console.warn('Could not fetch classes from server:', e.message);
+    } catch (e) {}
   }
+
+  const direct = await fetchMasterRegistryDirectFromSupabase();
+  if (direct && Array.isArray(direct.classes)) {
+    const deleted = new Set((direct.deletedClasses || []).map((c) => String(c).trim().toLowerCase()));
+    return direct.classes.filter((c) => c && !deleted.has(String(c).trim().toLowerCase()));
+  }
+
   return null;
 }
 
 /**
- * Save new class to backend
+ * Save new class to backend and Supabase directly
  */
 export async function createClass(className) {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/classes`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ className }),
-    });
-    if (res.ok) {
-      return await res.json();
-    }
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || 'Failed to create class');
-  } catch (e) {
-    console.warn('Could not persist class to server:', e.message);
-    throw e;
+  const cleanName = String(className).trim();
+  const candidateUrls = getCandidateBaseUrls();
+
+  for (const url of candidateUrls) {
+    try {
+      const res = await fetch(`${url}/api/classes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ className: cleanName }),
+      });
+      if (res.ok) break;
+    } catch (e) {}
   }
+
+  await saveMasterRegistryDirectToSupabase((reg) => {
+    const lower = cleanName.toLowerCase();
+    const classes = (reg.classes || []).filter((c) => c.trim().toLowerCase() !== lower);
+    classes.push(cleanName);
+    const deletedClasses = (reg.deletedClasses || []).filter((c) => c.trim().toLowerCase() !== lower);
+    return { ...reg, classes, deletedClasses };
+  });
+
+  return { success: true, className: cleanName, class: cleanName };
 }
 
 /**
- * Update / Rename an existing class
+ * Update / Rename an existing class in backend and Supabase directly
  */
 export async function updateClass(oldName, newName) {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/classes/${encodeURIComponent(oldName)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ newName }),
-    });
-    if (res.ok) {
-      return await res.json();
-    }
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || 'Failed to update class');
-  } catch (e) {
-    console.warn('Could not update class on server:', e.message);
-    throw e;
+  const cleanOld = String(oldName).trim();
+  const cleanNew = String(newName).trim();
+  const candidateUrls = getCandidateBaseUrls();
+
+  for (const url of candidateUrls) {
+    try {
+      const res = await fetch(`${url}/api/classes/${encodeURIComponent(cleanOld)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newName: cleanNew }),
+      });
+      if (res.ok) break;
+    } catch (e) {}
   }
+
+  await saveMasterRegistryDirectToSupabase((reg) => {
+    const lowerOld = cleanOld.toLowerCase();
+    const lowerNew = cleanNew.toLowerCase();
+    let classes = (reg.classes || []).filter((c) => c.trim().toLowerCase() !== lowerOld);
+    if (!classes.some((c) => c.trim().toLowerCase() === lowerNew)) {
+      classes.push(cleanNew);
+    }
+    let deletedClasses = (reg.deletedClasses || []).filter((c) => c.trim().toLowerCase() !== lowerNew);
+    if (!deletedClasses.some((c) => c.trim().toLowerCase() === lowerOld)) {
+      deletedClasses.push(cleanOld);
+    }
+    return { ...reg, classes, deletedClasses };
+  });
+
+  // Direct Supabase product applicable_class update
+  try {
+    await fetch(`${SUPABASE_REST_URL}/rest/v1/products?applicable_class=ilike.${encodeURIComponent(cleanOld)}`, {
+      method: 'PATCH',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ applicable_class: cleanNew }),
+    });
+  } catch (e) {}
+
+  return { success: true, oldName: cleanOld, newName: cleanNew };
 }
 
 /**
- * Delete a class from backend
+ * Delete a class from backend and Supabase directly
  */
 export async function deleteClass(className) {
-  try {
-    const cleanName = String(className).trim();
-    const res = await fetch(`${API_BASE_URL}/api/classes/${encodeURIComponent(cleanName)}`, {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      body: JSON.stringify({ className: cleanName }),
-    });
-    if (res.ok) {
-      return await res.json();
-    }
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || 'Failed to delete class');
-  } catch (e) {
-    console.warn('Could not delete class on server:', e.message);
-    throw e;
+  const cleanName = String(className).trim();
+  const candidateUrls = getCandidateBaseUrls();
+
+  for (const url of candidateUrls) {
+    try {
+      const res = await fetch(`${url}/api/classes/${encodeURIComponent(cleanName)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ className: cleanName }),
+      });
+      if (res.ok) break;
+    } catch (e) {}
   }
+
+  await saveMasterRegistryDirectToSupabase((reg) => {
+    const lower = cleanName.toLowerCase();
+    const classes = (reg.classes || []).filter((c) => c.trim().toLowerCase() !== lower);
+    const deletedClasses = reg.deletedClasses || [];
+    if (!deletedClasses.some((c) => c.trim().toLowerCase() === lower)) {
+      deletedClasses.push(cleanName);
+    }
+    return { ...reg, classes, deletedClasses };
+  });
+
+  // Reset class to 'All Classes' in Supabase products
+  try {
+    await fetch(`${SUPABASE_REST_URL}/rest/v1/products?applicable_class=ilike.${encodeURIComponent(cleanName)}`, {
+      method: 'PATCH',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ applicable_class: 'All Classes' }),
+    });
+  } catch (e) {}
+
+  return { success: true, deleted: cleanName };
 }
 
 
