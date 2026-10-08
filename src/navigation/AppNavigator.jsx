@@ -6,6 +6,7 @@ import OrdersScreen from '../screens/OrdersScreen';
 import AddProductScreen from '../screens/AddProductScreen';
 import EditProductScreen from '../screens/EditProductScreen';
 import ManageMastersScreen from '../screens/ManageMastersScreen';
+import StoreClosureScreen from '../screens/StoreClosureScreen';
 import CustomTabBar from '../components/CustomTabBar';
 import { colors } from '../theme/colors';
 
@@ -47,6 +48,8 @@ export default function AppNavigator() {
         return <AddProductScreen navigation={navigationMock} />;
       case 'EditProduct':
         return <EditProductScreen navigation={navigationMock} product={selectedProduct} />;
+      case 'StoreClosure':
+        return <StoreClosureScreen navigation={navigationMock} />;
       default:
         return <OverviewScreen navigation={navigationMock} />;
     }

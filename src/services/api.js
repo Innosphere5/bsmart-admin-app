@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { NativeModules, Platform } from 'react-native';
 import Constants from 'expo-constants';
 
 /**
@@ -8,78 +8,107 @@ import Constants from 'expo-constants';
 const PRODUCTION_API_URL = 'https://admin-app-backend-i5tk.onrender.com';
 const SUPABASE_REST_URL = 'https://rxnvxqrzgecynpxjobkh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_XPwu7-Cx7wQHzSOAeuB2rA_JSvjvTCd';
+const LOCAL_PORT = 5000;
+const CURRENT_LOCAL_IP = '10.53.190.144';
+
+/**
+ * Dynamically extract host IP of the developer's computer.
+ * Works across iOS Simulator, iOS physical device (Expo Go), Android Emulator, and physical phones.
+ */
+export function getDevHostIp() {
+  // 1. Check explicit EXPO_PUBLIC_LOCAL_IP environment variable
+  if (process.env.EXPO_PUBLIC_LOCAL_IP && typeof process.env.EXPO_PUBLIC_LOCAL_IP === 'string') {
+    const rawIp = process.env.EXPO_PUBLIC_LOCAL_IP.trim();
+    if (rawIp && rawIp !== 'localhost' && rawIp !== '127.0.0.1') {
+      return rawIp;
+    }
+  }
+
+  // 2. Check React Native NativeModules.SourceCode.scriptURL (Most accurate across all Expo/RN versions)
+  try {
+    const scriptURL = NativeModules?.SourceCode?.scriptURL;
+    if (scriptURL && typeof scriptURL === 'string') {
+      const match = scriptURL.match(/^https?:\/\/([^:/]+)/);
+      if (match && match[1] && match[1] !== 'localhost' && match[1] !== '127.0.0.1') {
+        return match[1];
+      }
+    }
+  } catch (e) {}
+
+  // 3. Check Constants.expoConfig?.hostUri or debuggerHost (Expo Go / Dev Client)
+  try {
+    const hostUri = Constants.expoConfig?.hostUri || 
+                    Constants.manifest?.debuggerHost || 
+                    Constants.manifest2?.extra?.expoGo?.debuggerHost;
+    if (hostUri && typeof hostUri === 'string') {
+      const ip = hostUri.split(':')[0];
+      if (ip && ip !== 'localhost' && ip !== '127.0.0.1') {
+        return ip;
+      }
+    }
+  } catch (e) {}
+
+  // 4. Check deep linking URI or experienceUrl
+  try {
+    const uri = Constants.linkingUri || Constants.experienceUrl;
+    if (uri && typeof uri === 'string') {
+      const match = uri.match(/:\/\/([^:/]+)/);
+      if (match && match[1] && match[1] !== 'localhost' && match[1] !== '127.0.0.1') {
+        return match[1];
+      }
+    }
+  } catch (e) {}
+
+  // 5. Fallback to active local development machine IP
+  return CURRENT_LOCAL_IP;
+}
 
 /**
  * Dynamically resolve backend API base URL
- * 1. Checks EXPO_PUBLIC_API_URL / EXPO_PUBLIC_BACKEND_URL (from .env or build env)
- * 2. In __DEV__, prioritizes local backend server (port 5000) over remote Render
- * 3. Checks Constants.expoConfig?.extra?.apiUrl (from app.json)
- * 4. Falls back to production Render backend if in release/production build
- * 5. Resolves local backend (port 5000) for local development (Expo Go, Emulator, Web)
  */
 const getApiBaseUrl = () => {
-  // 1. Explicit environment variable (Expo SDK 49+ support EXPO_PUBLIC_*)
+  // In development mode (__DEV__ === true), prioritize local machine backend
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    // Web browser running on developer machine
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.location?.hostname && !['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+        return PRODUCTION_API_URL;
+      }
+      return `http://localhost:${LOCAL_PORT}`;
+    }
+
+    // Android emulator special localhost alias
+    if (Platform.OS === 'android') {
+      const hostIp = getDevHostIp();
+      // If hostIp was dynamically discovered from Metro/Expo, use it so real devices work
+      if (hostIp && hostIp !== CURRENT_LOCAL_IP) {
+        return `http://${hostIp}:${LOCAL_PORT}`;
+      }
+      // Check if running on real device vs emulator
+      const isEmulator = !Constants.isDevice;
+      if (isEmulator) {
+        return `http://10.0.2.2:${LOCAL_PORT}`;
+      }
+      return `http://${hostIp}:${LOCAL_PORT}`;
+    }
+
+    // iOS (Simulator or physical device with Expo Go)
+    const hostIp = getDevHostIp();
+    return `http://${hostIp}:${LOCAL_PORT}`;
+  }
+
+  // Explicit environment variable override
   const envUrl = process.env.EXPO_PUBLIC_API_URL || process.env.EXPO_PUBLIC_BACKEND_URL;
   if (envUrl && typeof envUrl === 'string' && envUrl.trim() !== '') {
-    // If in development mode and envUrl points to remote Render, prioritize local dev machine on port 5000
-    if (typeof __DEV__ !== 'undefined' && __DEV__ && envUrl.includes('onrender.com')) {
-      if (Platform.OS === 'web') {
-        return 'http://localhost:5000';
-      }
-      try {
-        const hostUri = Constants.expoConfig?.hostUri || Constants.manifest?.debuggerHost;
-        if (hostUri) {
-          const ip = hostUri.split(':')[0];
-          if (ip && ip !== 'localhost' && ip !== '127.0.0.1') {
-            return `http://${ip}:5000`;
-          }
-        }
-      } catch (e) {}
-      if (Platform.OS === 'android') {
-        return 'http://10.0.2.2:5000';
-      }
-    }
     return envUrl.trim().replace(/\/+$/, '');
   }
 
-  // 2. Expo config extra field (from app.json)
-  const extraUrl = Constants.expoConfig?.extra?.apiUrl;
-  if (extraUrl && typeof extraUrl === 'string' && extraUrl.trim() !== '') {
-    return extraUrl.trim().replace(/\/+$/, '');
-  }
-
-  // 3. Production release builds (EAS build, standalone APK/bundle, deployed web)
+  // Production release builds (EAS build, standalone APK/bundle, deployed web)
   if (typeof __DEV__ !== 'undefined' && !__DEV__) {
     return PRODUCTION_API_URL;
   }
 
-  // 4. Local development fallbacks (__DEV__ === true)
-  if (Platform.OS === 'web') {
-    // Check if running on a remote web domain or local
-    if (typeof window !== 'undefined' && window.location?.hostname && !['localhost', '127.0.0.1'].includes(window.location.hostname)) {
-      return PRODUCTION_API_URL;
-    }
-    return 'http://localhost:5000';
-  }
-
-  // Expo Go / physical device resolving local dev machine IP on backend port 5000
-  try {
-    const hostUri = Constants.expoConfig?.hostUri || Constants.manifest?.debuggerHost;
-    if (hostUri) {
-      const ip = hostUri.split(':')[0];
-      if (ip && ip !== 'localhost' && ip !== '127.0.0.1') {
-        return `http://${ip}:5000`;
-      }
-    }
-  } catch (err) {
-    console.warn('Could not resolve Expo host IP, falling back:', err.message);
-  }
-
-  if (Platform.OS === 'android') {
-    return 'http://10.0.2.2:5000';
-  }
-
-  return PRODUCTION_API_URL;
+  return `http://${getDevHostIp()}:${LOCAL_PORT}`;
 };
 
 export const API_BASE_URL = getApiBaseUrl();
@@ -312,24 +341,22 @@ function getCandidateBaseUrls() {
   const urls = [];
   if (API_BASE_URL) urls.push(API_BASE_URL);
 
-  // Local candidate URLs
-  try {
-    const hostUri = Constants.expoConfig?.hostUri || Constants.manifest?.debuggerHost;
-    if (hostUri) {
-      const ip = hostUri.split(':')[0];
-      if (ip && ip !== 'localhost' && ip !== '127.0.0.1') {
-        const lanUrl = `http://${ip}:5000`;
-        if (!urls.includes(lanUrl)) urls.push(lanUrl);
-      }
-    }
-  } catch (e) {}
+  const hostIp = getDevHostIp();
+  if (hostIp) {
+    const lanUrl = `http://${hostIp}:${LOCAL_PORT}`;
+    if (!urls.includes(lanUrl)) urls.push(lanUrl);
+  }
 
-  if (Platform.OS === 'web') {
-    if (!urls.includes('http://localhost:5000')) urls.push('http://localhost:5000');
+  const fallbackLan = `http://${CURRENT_LOCAL_IP}:${LOCAL_PORT}`;
+  if (!urls.includes(fallbackLan)) urls.push(fallbackLan);
+
+  if (Platform.OS === 'web' || Platform.OS === 'ios') {
+    if (!urls.includes(`http://localhost:${LOCAL_PORT}`)) urls.push(`http://localhost:${LOCAL_PORT}`);
   }
   if (Platform.OS === 'android') {
-    if (!urls.includes('http://10.0.2.2:5000')) urls.push('http://10.0.2.2:5000');
+    if (!urls.includes(`http://10.0.2.2:${LOCAL_PORT}`)) urls.push(`http://10.0.2.2:${LOCAL_PORT}`);
   }
+  if (!urls.includes(PRODUCTION_API_URL)) urls.push(PRODUCTION_API_URL);
 
   return urls;
 }
@@ -990,5 +1017,200 @@ export async function deleteClass(className) {
   return { success: true, deleted: cleanName };
 }
 
+// ============================================================================
+// SHOP STATUS & STORE CLOSURE BANNER MANAGEMENT
+// ============================================================================
 
+/**
+ * Format real calendar date into a readable string (e.g., "Saturday, 10 Oct 2026")
+ */
+export function formatIndianDate(dateInput) {
+  try {
+    const d = new Date(dateInput);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('en-IN', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
+  } catch (e) {
+    return '';
+  }
+}
 
+/**
+ * Calculate reopening date based on starting date and number of closure days
+ */
+export function calculateReopenDate(days, startDate = new Date()) {
+  const start = new Date(startDate);
+  const reopen = new Date(start.getTime() + Math.max(1, Number(days) || 1) * 24 * 60 * 60 * 1000);
+  return {
+    reopenDate: reopen.toISOString(),
+    reopenDateFormatted: formatIndianDate(reopen),
+  };
+}
+
+/**
+ * Returns default shop status model (2 days closed by default)
+ */
+export function getDefaultShopStatus() {
+  const now = new Date();
+  const reopen = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
+  const formatted = formatIndianDate(reopen);
+
+  return {
+    isClosed: false,
+    closureDays: 2,
+    startDate: now.toISOString(),
+    reopenDate: reopen.toISOString(),
+    reopenDateFormatted: formatted,
+    bannerTitle: 'Shop Temporarily Closed for 2 Days',
+    bannerMessage: `Our shop is closed for 2 days. We will reopen on ${formatted}. Online orders placed now will be processed as soon as we reopen!`,
+    allowOrders: true,
+    showPopup: true,
+    showTopBanner: true,
+    updatedAt: now.toISOString(),
+  };
+}
+
+/**
+ * Direct Supabase REST fetch of Shop Status
+ */
+async function fetchShopStatusDirectFromSupabase() {
+  try {
+    const url = `${SUPABASE_REST_URL}/rest/v1/notifications?id=eq.sys_shop_status&select=message`;
+    const res = await fetch(url, {
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0 && data[0].message) {
+        const parsed = JSON.parse(data[0].message);
+        if (parsed && typeof parsed === 'object') {
+          if (parsed.reopenDate && !parsed.reopenDateFormatted) {
+            parsed.reopenDateFormatted = formatIndianDate(parsed.reopenDate);
+          }
+          return parsed;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Direct Supabase shop status fetch notice:', e.message);
+  }
+  return null;
+}
+
+/**
+ * Direct Supabase REST save/upsert of Shop Status
+ */
+async function saveShopStatusDirectToSupabase(statusData) {
+  try {
+    const payload = {
+      id: 'sys_shop_status',
+      order_id: 'SYSTEM',
+      type: 'shop_status',
+      title: 'Shop Status & Closure Banner',
+      message: JSON.stringify({
+        ...statusData,
+        updatedAt: new Date().toISOString(),
+      }),
+      target_role: 'all',
+      read: true,
+      created_at: new Date().toISOString(),
+    };
+
+    const res = await fetch(`${SUPABASE_REST_URL}/rest/v1/notifications`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=merge-duplicates',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    return res.ok;
+  } catch (e) {
+    console.warn('Direct Supabase shop status save notice:', e.message);
+    return false;
+  }
+}
+
+/**
+ * Fetch Shop Status and Closure Banner settings
+ */
+export async function fetchShopStatus() {
+  // 1. Try backend API endpoints
+  const candidateUrls = getCandidateBaseUrls();
+  for (const baseUrl of candidateUrls) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
+      const res = await fetch(`${baseUrl}/api/shop-status`, {
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.success && data.shopStatus) {
+          return data.shopStatus;
+        }
+      }
+    } catch (e) {}
+  }
+
+  // 2. Direct Supabase REST Fallback
+  const directData = await fetchShopStatusDirectFromSupabase();
+  if (directData) return directData;
+
+  // 3. Fallback default
+  return getDefaultShopStatus();
+}
+
+/**
+ * Update Shop Status and Closure Banner settings
+ */
+export async function updateShopStatus(statusData) {
+  // Prepare data with calculated real dates
+  const current = (await fetchShopStatus()) || getDefaultShopStatus();
+  const merged = {
+    ...current,
+    ...statusData,
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (merged.reopenDate) {
+    merged.reopenDateFormatted = formatIndianDate(merged.reopenDate);
+  } else if (merged.closureDays) {
+    const calculated = calculateReopenDate(merged.closureDays, merged.startDate || new Date());
+    merged.reopenDate = calculated.reopenDate;
+    merged.reopenDateFormatted = calculated.reopenDateFormatted;
+  }
+
+  // 1. Direct Supabase save (primary, real-time push to website)
+  const supabaseSuccess = await saveShopStatusDirectToSupabase(merged);
+
+  // 2. Also notify backend API if available
+  const candidateUrls = getCandidateBaseUrls();
+  for (const baseUrl of candidateUrls) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      await fetch(`${baseUrl}/api/shop-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(merged),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+    } catch (e) {}
+  }
+
+  return { success: true, shopStatus: merged };
+}

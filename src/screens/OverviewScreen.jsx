@@ -5,25 +5,38 @@ import {
   StyleSheet,
   ScrollView,
   Pressable,
+  Switch,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import StatusBadge from '../components/StatusBadge';
 import { overviewMetrics, recentOrders } from '../data/mockData';
 import { colors, radii, spacing, typography } from '../theme/colors';
-import { fetchProducts, fetchOrders } from '../services/api';
+import {
+  fetchProducts,
+  fetchOrders,
+  fetchShopStatus,
+  updateShopStatus,
+  calculateReopenDate,
+  formatIndianDate,
+} from '../services/api';
 
 export default function OverviewScreen({ navigation }) {
   const [totalProducts, setTotalProducts] = useState(0);
   const [lowStockCount, setLowStockCount] = useState(0);
   const [ordersList, setOrdersList] = useState([]);
   const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
+  const [shopStatus, setShopStatus] = useState(null);
+  const [isTogglingShop, setIsTogglingShop] = useState(false);
 
   const loadLiveMetrics = async () => {
     try {
-      const [items, liveOrders] = await Promise.all([
+      const [items, liveOrders, status] = await Promise.all([
         fetchProducts(),
-        fetchOrders()
+        fetchOrders(),
+        fetchShopStatus(),
       ]);
 
       if (Array.isArray(items)) {
@@ -40,6 +53,10 @@ export default function OverviewScreen({ navigation }) {
         const pending = liveOrders.filter((o) => o.status === 'pending').length;
         setPendingOrdersCount(pending);
       }
+
+      if (status) {
+        setShopStatus(status);
+      }
     } catch (err) {
       console.error('Error fetching overview metrics:', err);
     }
@@ -47,19 +64,123 @@ export default function OverviewScreen({ navigation }) {
 
   useEffect(() => {
     loadLiveMetrics();
-    const interval = setInterval(loadLiveMetrics, 3000);
+    const interval = setInterval(loadLiveMetrics, 4000);
     return () => clearInterval(interval);
   }, []);
 
+  const handleQuickToggleShop = async (newVal) => {
+    setIsTogglingShop(true);
+    try {
+      let updatePayload;
+      if (newVal) {
+        // Turning ON: default to 2 days closed from now
+        const days = 2;
+        const now = new Date();
+        const calculated = calculateReopenDate(days, now);
+        updatePayload = {
+          isClosed: true,
+          closureDays: days,
+          startDate: now.toISOString(),
+          reopenDate: calculated.reopenDate,
+          reopenDateFormatted: calculated.reopenDateFormatted,
+          bannerTitle: 'Shop Temporarily Closed for 2 Days',
+          bannerMessage: `Our shop is closed for 2 days. We will reopen on ${calculated.reopenDateFormatted}. Online orders placed now will be processed as soon as we reopen!`,
+          allowOrders: true,
+          showPopup: true,
+          showTopBanner: true,
+        };
+      } else {
+        // Turning OFF: store is open
+        updatePayload = {
+          isClosed: false,
+        };
+      }
+
+      const res = await updateShopStatus(updatePayload);
+      if (res && res.success) {
+        setShopStatus(res.shopStatus);
+        Alert.alert(
+          newVal ? '🔴 Shop Closed for 2 Days' : '🟢 Shop Reopened',
+          newVal
+            ? `Shop set to CLOSED for 2 days (Reopening on ${updatePayload.reopenDateFormatted}). The banner and popup are live on the website!`
+            : 'Shop is now marked OPEN. The banner has been removed from the website.'
+        );
+      }
+    } catch (e) {
+      Alert.alert('Error', 'Failed to update shop status: ' + e.message);
+    } finally {
+      setIsTogglingShop(false);
+    }
+  };
+
+  const isClosed = Boolean(shopStatus?.isClosed);
+  const reopenFormatted = shopStatus?.reopenDateFormatted || 'Saturday, 10 Oct 2026';
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-
       <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
         {/* Title Header */}
         <View style={styles.titleSection}>
           <Text style={typography.h1}>Overview</Text>
-          <Text style={typography.subtitle}>Today's operational metrics</Text>
+          <Text style={typography.subtitle}>Today's operational metrics & store status</Text>
+        </View>
+
+        {/* STORE CLOSURE BANNER MANAGEMENT CARD */}
+        <View style={[styles.storeStatusCard, isClosed ? styles.storeClosedCard : styles.storeOpenCard]}>
+          <View style={styles.storeStatusHeader}>
+            <View style={styles.storeStatusTitleRow}>
+              <View style={[styles.storeIconCircle, isClosed ? styles.storeIconClosed : styles.storeIconOpen]}>
+                <Ionicons
+                  name={isClosed ? 'lock-closed' : 'storefront'}
+                  size={20}
+                  color={isClosed ? colors.red : colors.green}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <View style={styles.storeStatusPillRow}>
+                  <Text style={styles.storeStatusHeading}>Shop Status:</Text>
+                  <View style={[styles.pillBadge, isClosed ? styles.pillClosed : styles.pillOpen]}>
+                    <Text style={[styles.pillText, isClosed ? styles.pillTextClosed : styles.pillTextOpen]}>
+                      {isClosed ? 'CLOSED (BANNER ACTIVE)' : 'OPEN & TAKING ORDERS'}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.storeStatusSubtext}>
+                  {isClosed
+                    ? `Closed for ${shopStatus?.closureDays || 2} days • Reopening ${reopenFormatted}`
+                    : 'Shop is currently operating normally. Tap toggle to close for 2 days.'}
+                </Text>
+              </View>
+            </View>
+
+            {/* Quick Toggle Switch */}
+            <View style={styles.switchWrapper}>
+              {isTogglingShop ? (
+                <ActivityIndicator size="small" color={colors.navy} />
+              ) : (
+                <Switch
+                  value={isClosed}
+                  onValueChange={handleQuickToggleShop}
+                  trackColor={{ false: '#CBD5E1', true: '#FECDD3' }}
+                  thumbColor={isClosed ? colors.red : '#F8FAFC'}
+                />
+              )}
+            </View>
+          </View>
+
+          {/* Quick Action Button to Configure Closure & Dates */}
+          <View style={styles.storeActionsRow}>
+            <Pressable
+              style={styles.manageClosureBtn}
+              onPress={() => navigation?.navigate('StoreClosure')}
+            >
+              <Ionicons name="calendar-outline" size={16} color={colors.navy} />
+              <Text style={styles.manageClosureBtnText}>
+                {isClosed ? 'Edit Closure Dates & Banner' : 'Configure 2-Day Closure Banner'}
+              </Text>
+              <Ionicons name="chevron-forward" size={16} color={colors.navy} />
+            </Pressable>
+          </View>
         </View>
 
         {/* Quick Action Buttons */}
@@ -342,4 +463,111 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.textPrimary,
   },
+  storeStatusCard: {
+    backgroundColor: colors.card,
+    borderRadius: radii.md,
+    borderWidth: 1.5,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  storeOpenCard: {
+    borderColor: '#86EFAC',
+    backgroundColor: '#F0FDF4',
+  },
+  storeClosedCard: {
+    borderColor: '#FCA5A5',
+    backgroundColor: '#FFF1F2',
+  },
+  storeStatusHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  storeStatusTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    flex: 1,
+  },
+  storeIconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  storeIconOpen: {
+    backgroundColor: '#DCFCE7',
+  },
+  storeIconClosed: {
+    backgroundColor: '#FEE2E2',
+  },
+  storeStatusPillRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 2,
+  },
+  storeStatusHeading: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.navy,
+  },
+  pillBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: radii.xs,
+  },
+  pillOpen: {
+    backgroundColor: '#DCFCE7',
+  },
+  pillClosed: {
+    backgroundColor: '#FEE2E2',
+  },
+  pillText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  pillTextOpen: {
+    color: '#15803D',
+  },
+  pillTextClosed: {
+    color: '#B91C1C',
+  },
+  storeStatusSubtext: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    lineHeight: 16,
+  },
+  switchWrapper: {
+    paddingLeft: spacing.xs,
+  },
+  storeActionsRow: {
+    marginTop: spacing.sm,
+    paddingTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,0,0,0.05)',
+  },
+  manageClosureBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.sm,
+  },
+  manageClosureBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.navy,
+    flex: 1,
+    marginLeft: 6,
+  },
 });
+

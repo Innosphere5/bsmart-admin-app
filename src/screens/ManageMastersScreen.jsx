@@ -352,18 +352,27 @@ export default function ManageMastersScreen({ navigation }) {
             Full CRUD: Add, Edit &amp; Delete Categories, Schools &amp; Classes
           </Text>
         </View>
-        <Pressable
-          style={styles.refreshIconBtn}
-          onPress={onRefresh}
-          disabled={isRefreshing || isLoading}
-        >
-          <Ionicons
-            name="refresh-outline"
-            size={20}
-            color={colors.navy}
-            style={isRefreshing && { transform: [{ rotate: '45deg' }] }}
-          />
-        </Pressable>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Pressable
+            style={styles.storeClosureHeaderBtn}
+            onPress={() => navigation?.navigate('StoreClosure')}
+          >
+            <Ionicons name="lock-closed-outline" size={15} color={colors.white} />
+            <Text style={styles.storeClosureHeaderBtnText}>Closure Banner</Text>
+          </Pressable>
+          <Pressable
+            style={styles.refreshIconBtn}
+            onPress={onRefresh}
+            disabled={isRefreshing || isLoading}
+          >
+            <Ionicons
+              name="refresh-outline"
+              size={20}
+              color={colors.navy}
+              style={isRefreshing && { transform: [{ rotate: '45deg' }] }}
+            />
+          </Pressable>
+        </View>
       </View>
 
       {/* Segmented Switcher Tabs */}
@@ -837,6 +846,20 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.textSecondary,
     marginTop: 2,
+  },
+  storeClosureHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 7,
+    borderRadius: radii.sm,
+    backgroundColor: '#881337',
+    gap: 4,
+  },
+  storeClosureHeaderBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.white,
   },
   refreshIconBtn: {
     padding: 8,
