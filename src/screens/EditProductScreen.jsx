@@ -540,9 +540,14 @@ export default function EditProductScreen({ navigation, product }) {
           <View style={styles.pairRowsContainer}>
             {sizePricePairs.map((pair, idx) => {
               const numStock = parseInt(pair.stock, 10);
-              const isLowStock = !isNaN(numStock) && numStock <= 2 && pair.stock.trim() !== '';
+              const isOutOfStock = !isNaN(numStock) && numStock === 0 && pair.stock.trim() !== '';
+              const isLowStock = !isNaN(numStock) && numStock === 1 && pair.stock.trim() !== '';
               return (
-                <View key={idx} style={[styles.pairRowItem, isLowStock && { borderColor: '#FCA5A5', backgroundColor: '#FFF5F5' }]}>
+                <View key={idx} style={[
+                  styles.pairRowItem,
+                  isOutOfStock && { borderColor: '#FCA5A5', backgroundColor: '#FFF5F5' },
+                  isLowStock && { borderColor: '#FCD34D', backgroundColor: '#FFFBEB' }
+                ]}>
                   <View style={styles.pairInputCol}>
                     <Text style={styles.pairFieldLabel}>Size Name</Text>
                     <TextInput
@@ -569,14 +574,18 @@ export default function EditProductScreen({ navigation, product }) {
                   <View style={styles.pairInputCol}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
                       <Text style={styles.pairFieldLabel}>Stock/Qty</Text>
+                      {isOutOfStock && (
+                        <Text style={{ fontSize: 9, fontWeight: '800', color: colors.red }}>Out (0)</Text>
+                      )}
                       {isLowStock && (
-                        <Text style={{ fontSize: 9, fontWeight: '800', color: colors.red }}>Low ≤2</Text>
+                        <Text style={{ fontSize: 9, fontWeight: '800', color: '#B45309' }}>Low (1)</Text>
                       )}
                     </View>
                     <TextInput
                       style={[
                         styles.pairTextInput,
-                        isLowStock && { borderColor: colors.red, backgroundColor: '#FEF2F2', color: colors.red }
+                        isOutOfStock && { borderColor: colors.red, backgroundColor: '#FEF2F2', color: colors.red },
+                        isLowStock && { borderColor: '#F59E0B', backgroundColor: '#FEF3C7', color: '#B45309' }
                       ]}
                       placeholder="Qty (e.g. 10)"
                       placeholderTextColor={colors.textMuted}
@@ -610,13 +619,18 @@ export default function EditProductScreen({ navigation, product }) {
                 .filter((p) => p.size.trim() !== '')
                 .map((pair, idx) => {
                   const numStock = parseInt(pair.stock, 10);
-                  const isLow = !isNaN(numStock) && numStock <= 2 && pair.stock.trim() !== '';
+                  const isOut = !isNaN(numStock) && numStock === 0 && pair.stock.trim() !== '';
+                  const isLow = !isNaN(numStock) && numStock === 1 && pair.stock.trim() !== '';
                   return (
-                    <View key={idx} style={[styles.sizePriceChip, isLow && { borderColor: '#F87171', backgroundColor: '#FEF2F2' }]}>
+                    <View key={idx} style={[
+                      styles.sizePriceChip,
+                      isOut && { borderColor: '#F87171', backgroundColor: '#FEF2F2' },
+                      isLow && { borderColor: '#FCD34D', backgroundColor: '#FFFBEB' }
+                    ]}>
                       <Text style={styles.sizeChipKey}>Size {pair.size}</Text>
                       <Text style={styles.sizeChipPrice}>₹{pair.price || '0'}</Text>
-                      <Text style={{ fontSize: 10, fontWeight: '800', color: isLow ? colors.red : '#4B5563' }}>
-                        {isLow ? `⚠️ Low: ${pair.stock || '0'}` : `Qty: ${pair.stock || '0'}`}
+                      <Text style={{ fontSize: 10, fontWeight: '800', color: isOut ? colors.red : isLow ? '#B45309' : '#4B5563' }}>
+                        {isOut ? `Out of Stock` : isLow ? `⚠️ Low: 1` : `Qty: ${pair.stock || '0'}`}
                       </Text>
                     </View>
                   );

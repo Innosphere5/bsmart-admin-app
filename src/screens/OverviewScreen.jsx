@@ -22,6 +22,7 @@ import {
   calculateReopenDate,
   formatIndianDate,
 } from '../services/api';
+import { manualCheckForUpdate } from '../services/updateService';
 
 export default function OverviewScreen({ navigation }) {
   const [totalProducts, setTotalProducts] = useState(0);
@@ -43,7 +44,7 @@ export default function OverviewScreen({ navigation }) {
         setTotalProducts(items.length);
         const low = items.filter((p) => {
           const qty = Number(p.stockQuantity ?? 50);
-          return (qty > 0 && qty <= 2) || p.stock === 'low' || p.inStock === false;
+          return p.stockStatus === 'Low Stock' || qty === 1 || p.stock === 'low';
         }).length;
         setLowStockCount(low);
       }
@@ -79,13 +80,15 @@ export default function OverviewScreen({ navigation }) {
         const calculated = calculateReopenDate(days, now);
         updatePayload = {
           isClosed: true,
+          deliveryOrdersClosed: true,
+          allowOrders: false,
           closureDays: days,
           startDate: now.toISOString(),
           reopenDate: calculated.reopenDate,
           reopenDateFormatted: calculated.reopenDateFormatted,
-          bannerTitle: 'Shop Temporarily Closed for 2 Days',
-          bannerMessage: `Our shop is closed for 2 days. We will reopen on ${calculated.reopenDateFormatted}. Online orders placed now will be processed as soon as we reopen!`,
-          allowOrders: true,
+          bannerTitle: 'Online Order Processing Paused',
+          bannerMessage:
+            'We are currently not processing any online orders, Please revisit our website after a few business days.',
           showPopup: true,
           showTopBanner: true,
         };
@@ -93,6 +96,8 @@ export default function OverviewScreen({ navigation }) {
         // Turning OFF: store is open
         updatePayload = {
           isClosed: false,
+          deliveryOrdersClosed: false,
+          allowOrders: true,
         };
       }
 
@@ -100,10 +105,10 @@ export default function OverviewScreen({ navigation }) {
       if (res && res.success) {
         setShopStatus(res.shopStatus);
         Alert.alert(
-          newVal ? '🔴 Shop Closed for 2 Days' : '🟢 Shop Reopened',
+          newVal ? '🔴 Delivery Orders Closed' : '🟢 Delivery Orders Reopened',
           newVal
-            ? `Shop set to CLOSED for 2 days (Reopening on ${updatePayload.reopenDateFormatted}). The banner and popup are live on the website!`
-            : 'Shop is now marked OPEN. The banner has been removed from the website.'
+            ? `Delivery orders CLOSED! Website is locked showing ONLY the single notice page: "We are currently not processing any online orders, Please revisit our website after a few business days."`
+            : 'Delivery orders reopened. The entire website is now live and accepting orders.'
         );
       }
     } catch (e) {
@@ -113,16 +118,25 @@ export default function OverviewScreen({ navigation }) {
     }
   };
 
-  const isClosed = Boolean(shopStatus?.isClosed);
+  const isClosed = Boolean(shopStatus?.isClosed || shopStatus?.deliveryOrdersClosed || shopStatus?.allowOrders === false);
   const reopenFormatted = shopStatus?.reopenDateFormatted || 'Saturday, 10 Oct 2026';
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
-        {/* Title Header */}
-        <View style={styles.titleSection}>
-          <Text style={typography.h1}>Overview</Text>
-          <Text style={typography.subtitle}>Today's operational metrics & store status</Text>
+        {/* Title Header with OTA Update Button */}
+        <View style={styles.titleSectionRow}>
+          <View style={styles.titleSection}>
+            <Text style={typography.h1}>Overview</Text>
+            <Text style={typography.subtitle}>Today's operational metrics & store status</Text>
+          </View>
+          <Pressable
+            style={styles.otaUpdateBadgeBtn}
+            onPress={manualCheckForUpdate}
+          >
+            <Ionicons name="refresh-circle-outline" size={16} color={colors.navy} />
+            <Text style={styles.otaUpdateBadgeText}>Check Update</Text>
+          </Pressable>
         </View>
 
         {/* STORE CLOSURE BANNER MANAGEMENT CARD */}
@@ -138,17 +152,17 @@ export default function OverviewScreen({ navigation }) {
               </View>
               <View style={{ flex: 1 }}>
                 <View style={styles.storeStatusPillRow}>
-                  <Text style={styles.storeStatusHeading}>Shop Status:</Text>
+                  <Text style={styles.storeStatusHeading}>Delivery Orders:</Text>
                   <View style={[styles.pillBadge, isClosed ? styles.pillClosed : styles.pillOpen]}>
                     <Text style={[styles.pillText, isClosed ? styles.pillTextClosed : styles.pillTextOpen]}>
-                      {isClosed ? 'CLOSED (BANNER ACTIVE)' : 'OPEN & TAKING ORDERS'}
+                      {isClosed ? 'CLOSED (WEBSITE LOCKED)' : 'OPEN & TAKING ORDERS'}
                     </Text>
                   </View>
                 </View>
                 <Text style={styles.storeStatusSubtext}>
                   {isClosed
-                    ? `Closed for ${shopStatus?.closureDays || 2} days • Reopening ${reopenFormatted}`
-                    : 'Shop is currently operating normally. Tap toggle to close for 2 days.'}
+                    ? `Website shows single notice page • Reopening ${reopenFormatted}`
+                    : 'Taking online orders. Tap toggle to close delivery orders and lock site.'}
                 </Text>
               </View>
             </View>
@@ -176,7 +190,7 @@ export default function OverviewScreen({ navigation }) {
             >
               <Ionicons name="calendar-outline" size={16} color={colors.navy} />
               <Text style={styles.manageClosureBtnText}>
-                {isClosed ? 'Edit Closure Dates & Banner' : 'Configure 2-Day Closure Banner'}
+                {isClosed ? 'Edit Closure Dates & Notice Page' : 'Manage Delivery Closure & Dates'}
               </Text>
               <Ionicons name="chevron-forward" size={16} color={colors.navy} />
             </Pressable>
@@ -304,8 +318,30 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     paddingBottom: spacing.xxl * 2,
   },
-  titleSection: {
+  titleSectionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: spacing.md,
+  },
+  titleSection: {
+    flex: 1,
+  },
+  otaUpdateBadgeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.navySoft,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radii.pill,
+    gap: 4,
+  },
+  otaUpdateBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.navy,
   },
   actionsRow: {
     flexDirection: 'row',

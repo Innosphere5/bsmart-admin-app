@@ -108,9 +108,12 @@ export default function InventoryScreen({ navigation }) {
           <View style={styles.itemsList}>
             {filteredItems.map((item) => {
               const stock = item.stockQuantity ?? 50;
-              let status = 'In Stock';
-              if (stock === 0) status = 'Out of Stock';
-              else if (stock <= 2) status = 'Low Stock';
+              let status = item.stockStatus;
+              if (!status) {
+                if (stock <= 0 || item.inStock === false) status = 'Out of Stock';
+                else if (stock === 1) status = 'Low Stock';
+                else status = 'In Stock';
+              }
 
               const imageUri =
                 item.imageSrc || item.images?.[0] || 'https://images.unsplash.com/photo-1544441893-675973e31985?w=600';

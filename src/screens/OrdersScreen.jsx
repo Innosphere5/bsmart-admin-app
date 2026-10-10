@@ -18,7 +18,17 @@ import AdminHeader from '../components/AdminHeader';
 import StatusBadge from '../components/StatusBadge';
 import { OrdersSkeletonList } from '../components/Skeleton';
 import { colors, radii, spacing, typography } from '../theme/colors';
-import { fetchOrders, updateOrderStatus, getOrderPdfUrl, fetchNotifications, getRealtimeStreamUrl, deleteOrder } from '../services/api';
+import {
+  fetchOrders,
+  updateOrderStatus,
+  getOrderPdfUrl,
+  fetchNotifications,
+  getRealtimeStreamUrl,
+  deleteOrder,
+  fetchShopStatus,
+  updateShopStatus,
+  calculateReopenDate,
+} from '../services/api';
 
 const STATUS_FILTERS = ['All', 'Pending', 'Accepted', 'Completed', 'Declined', 'Cancelled'];
 const DELIVERY_PRESETS = [
@@ -57,11 +67,15 @@ export default function OrdersScreen({ navigation }) {
   const [incomingOrderModalVisible, setIncomingOrderModalVisible] = useState(false);
   const [incomingOrder, setIncomingOrder] = useState(null);
 
+  // Shop / Delivery Orders Closure Status
+  const [shopStatus, setShopStatus] = useState(null);
+
   const loadOrdersData = async () => {
     try {
-      const [data, notifs] = await Promise.all([
+      const [data, notifs, status] = await Promise.all([
         fetchOrders(),
-        fetchNotifications('all')
+        fetchNotifications('all'),
+        fetchShopStatus(),
       ]);
       if (Array.isArray(data)) {
         setOrders(data);
@@ -75,10 +89,102 @@ export default function OrdersScreen({ navigation }) {
         const unread = notifs.filter((n) => !n.read).length;
         setUnreadCount(unread);
       }
+      if (status) {
+        setShopStatus(status);
+      }
     } catch (err) {
       console.warn('Error fetching orders / notifications:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const isDeliveryOrdersClosed = Boolean(
+    shopStatus?.isClosed ||
+    shopStatus?.deliveryOrdersClosed ||
+    shopStatus?.allowOrders === false
+  );
+
+  const handleToggleDeliveryOrders = (close) => {
+    if (close) {
+      Alert.alert(
+        'Close Online Delivery Orders?',
+        'This will immediately pause online orders and lock the website so it displays ONLY the single notice page:\n\n"We are currently not processing any online orders, Please revisit our website after a few business days."',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Yes, Close Orders',
+            style: 'destructive',
+            onPress: async () => {
+              setActionLoading(true);
+              try {
+                const days = 2;
+                const now = new Date();
+                const calc = calculateReopenDate(days, now);
+                const payload = {
+                  isClosed: true,
+                  deliveryOrdersClosed: true,
+                  allowOrders: false,
+                  closureDays: days,
+                  startDate: now.toISOString(),
+                  reopenDate: calc.reopenDate,
+                  reopenDateFormatted: calc.reopenDateFormatted,
+                  bannerTitle: 'Online Order Processing Paused',
+                  bannerMessage:
+                    'We are currently not processing any online orders, Please revisit our website after a few business days.',
+                  showPopup: true,
+                  showTopBanner: true,
+                };
+                const res = await updateShopStatus(payload);
+                if (res?.success) {
+                  setShopStatus(res.shopStatus);
+                  Alert.alert(
+                    '🔴 Delivery Orders Closed',
+                    'Website is now locked to show ONLY the single closure notice page: "We are currently not processing any online orders, Please revisit our website after a few business days."'
+                  );
+                }
+              } catch (e) {
+                Alert.alert('Error', 'Failed to close delivery orders: ' + e.message);
+              } finally {
+                setActionLoading(false);
+              }
+            },
+          },
+        ]
+      );
+    } else {
+      Alert.alert(
+        'Reopen Online Delivery Orders?',
+        'This will immediately unlock the full website so customers can view products, access the cart, and place orders.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Yes, Reopen Store',
+            style: 'default',
+            onPress: async () => {
+              setActionLoading(true);
+              try {
+                const res = await updateShopStatus({
+                  isClosed: false,
+                  deliveryOrdersClosed: false,
+                  allowOrders: true,
+                });
+                if (res?.success) {
+                  setShopStatus(res.shopStatus);
+                  Alert.alert(
+                    '🟢 Store Reopened',
+                    'Online delivery orders are now active. Customers can browse and purchase uniforms.'
+                  );
+                }
+              } catch (e) {
+                Alert.alert('Error', 'Failed to reopen delivery orders: ' + e.message);
+              } finally {
+                setActionLoading(false);
+              }
+            },
+          },
+        ]
+      );
     }
   };
 
@@ -294,6 +400,52 @@ export default function OrdersScreen({ navigation }) {
               </Pressable>
             </View>
           </Pressable>
+        )}
+
+        {/* Delivery Orders Status Bar */}
+        {isDeliveryOrdersClosed ? (
+          <View style={styles.deliveryClosedBar}>
+            <View style={styles.deliveryClosedLeft}>
+              <View style={styles.deliveryClosedIconCircle}>
+                <Ionicons name="lock-closed" size={15} color="#DC2626" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.deliveryClosedTitle}>Online Delivery Orders: CLOSED</Text>
+                <Text style={styles.deliveryClosedSubtitle} numberOfLines={1}>
+                  Website locked to single notice page
+                </Text>
+              </View>
+            </View>
+            <View style={styles.deliveryClosedActions}>
+              <Pressable
+                style={styles.reopenActionBtn}
+                onPress={() => handleToggleDeliveryOrders(false)}
+              >
+                <Ionicons name="lock-open-outline" size={13} color="#15803D" />
+                <Text style={styles.reopenActionBtnText}>Reopen</Text>
+              </Pressable>
+              <Pressable
+                style={styles.settingsActionBtn}
+                onPress={() => navigation?.navigate('StoreClosure')}
+              >
+                <Ionicons name="options-outline" size={15} color={colors.navy} />
+              </Pressable>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.deliveryOpenBar}>
+            <View style={styles.deliveryOpenLeft}>
+              <View style={styles.greenPulseDot} />
+              <Text style={styles.deliveryOpenTitle}>Delivery Orders: ACTIVE</Text>
+            </View>
+            <Pressable
+              style={styles.closeOrdersBtn}
+              onPress={() => handleToggleDeliveryOrders(true)}
+            >
+              <Ionicons name="pause-circle-outline" size={14} color="#DC2626" />
+              <Text style={styles.closeOrdersBtnText}>Pause / Close Orders</Text>
+            </Pressable>
+          </View>
         )}
 
         {/* Search Bar */}
@@ -1641,5 +1793,112 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
     color: colors.white,
+  },
+  deliveryClosedBar: {
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECDD3',
+    borderRadius: radii.md,
+    padding: spacing.sm,
+    paddingHorizontal: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  deliveryClosedLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    flex: 1,
+  },
+  deliveryClosedIconCircle: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#FEE2E2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deliveryClosedTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#991B1B',
+  },
+  deliveryClosedSubtitle: {
+    fontSize: 10,
+    color: '#64748B',
+    marginTop: 1,
+  },
+  deliveryClosedActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  reopenActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#DCFCE7',
+    borderWidth: 1,
+    borderColor: '#86EFAC',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: radii.xs,
+  },
+  reopenActionBtnText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#15803D',
+  },
+  settingsActionBtn: {
+    padding: 5,
+    backgroundColor: '#F1F5F9',
+    borderRadius: radii.xs,
+  },
+  deliveryOpenBar: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: radii.md,
+    paddingVertical: 6,
+    paddingHorizontal: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.xs,
+  },
+  deliveryOpenLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  greenPulseDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#16A34A',
+  },
+  deliveryOpenTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#334155',
+  },
+  closeOrdersBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: radii.xs,
+    backgroundColor: '#FFF1F2',
+    borderWidth: 1,
+    borderColor: '#FECDD3',
+  },
+  closeOrdersBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#DC2626',
   },
 });

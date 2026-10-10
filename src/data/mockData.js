@@ -106,7 +106,7 @@ export const inventoryItems = [
     school: 'Oakridge High',
     size: 'Size M',
     status: 'Low Stock',
-    stockLeft: 15,
+    stockLeft: 1,
   },
   {
     id: 'inv-2',

@@ -27,6 +27,7 @@ export default function StoreClosureScreen({ navigation }) {
 
   // Shop Status State
   const [isClosed, setIsClosed] = useState(false);
+  const [deliveryOrdersClosed, setDeliveryOrdersClosed] = useState(false);
   const [closureDays, setClosureDays] = useState(2);
   const [startDate, setStartDate] = useState(new Date().toISOString());
   const [reopenDate, setReopenDate] = useState(
@@ -35,13 +36,11 @@ export default function StoreClosureScreen({ navigation }) {
   const [reopenDateFormatted, setReopenDateFormatted] = useState(
     formatIndianDate(new Date(Date.now() + 2 * 24 * 60 * 60 * 1000))
   );
-  const [bannerTitle, setBannerTitle] = useState('Shop Temporarily Closed for 2 Days');
+  const [bannerTitle, setBannerTitle] = useState('Online Order Processing Paused');
   const [bannerMessage, setBannerMessage] = useState(
-    `Our shop is closed for 2 days. We will reopen on ${formatIndianDate(
-      new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)
-    )}. Online orders placed now will be processed as soon as we reopen!`
+    'We are currently not processing any online orders, Please revisit our website after a few business days.'
   );
-  const [allowOrders, setAllowOrders] = useState(true);
+  const [allowOrders, setAllowOrders] = useState(false);
   const [showPopup, setShowPopup] = useState(true);
   const [showTopBanner, setShowTopBanner] = useState(true);
 
@@ -51,7 +50,9 @@ export default function StoreClosureScreen({ navigation }) {
     try {
       const data = await fetchShopStatus();
       if (data) {
-        setIsClosed(Boolean(data.isClosed));
+        const closed = Boolean(data.isClosed || data.deliveryOrdersClosed || data.allowOrders === false);
+        setIsClosed(closed);
+        setDeliveryOrdersClosed(Boolean(data.deliveryOrdersClosed || closed));
         const days = Number(data.closureDays) || 2;
         setClosureDays(days);
         setStartDate(data.startDate || new Date().toISOString());
@@ -60,14 +61,12 @@ export default function StoreClosureScreen({ navigation }) {
         setReopenDate(targetReopen);
         setReopenDateFormatted(data.reopenDateFormatted || formatIndianDate(targetReopen));
 
-        setBannerTitle(data.bannerTitle || `Shop Temporarily Closed for ${days} Days`);
+        setBannerTitle(data.bannerTitle || 'Online Order Processing Paused');
         setBannerMessage(
           data.bannerMessage ||
-            `Our shop is closed for ${days} days. We will reopen on ${
-              data.reopenDateFormatted || formatIndianDate(targetReopen)
-            }. Online orders placed now will be processed as soon as we reopen!`
+            'We are currently not processing any online orders, Please revisit our website after a few business days.'
         );
-        setAllowOrders(data.allowOrders !== false);
+        setAllowOrders(data.allowOrders !== false && !closed);
         setShowPopup(data.showPopup !== false);
         setShowTopBanner(data.showTopBanner !== false);
       }
@@ -94,11 +93,9 @@ export default function StoreClosureScreen({ navigation }) {
     setReopenDateFormatted(calculated.reopenDateFormatted);
 
     if (updateText) {
-      setBannerTitle(`Shop Temporarily Closed for ${days} ${days === 1 ? 'Day' : 'Days'}`);
+      setBannerTitle(`Delivery Orders Paused for ${days} ${days === 1 ? 'Day' : 'Days'}`);
       setBannerMessage(
-        `Our shop is closed for ${days} ${
-          days === 1 ? 'day' : 'days'
-        }. We will reopen on ${calculated.reopenDateFormatted}. Online orders placed now will be processed as soon as we reopen!`
+        'We are currently not processing any online orders, Please revisit our website after a few business days.'
       );
     }
   };
@@ -112,6 +109,8 @@ export default function StoreClosureScreen({ navigation }) {
   // Toggle Shop Closed switch
   const handleToggleClosed = (val) => {
     setIsClosed(val);
+    setDeliveryOrdersClosed(val);
+    setAllowOrders(!val);
     if (val && closureDays <= 0) {
       handleDaysChange(2, true);
     }
@@ -119,11 +118,9 @@ export default function StoreClosureScreen({ navigation }) {
 
   // Auto-generate fresh text based on current real date
   const handleRegenerateText = () => {
-    setBannerTitle(`Shop Temporarily Closed for ${closureDays} ${closureDays === 1 ? 'Day' : 'Days'}`);
+    setBannerTitle(`Delivery Orders Paused for ${closureDays} ${closureDays === 1 ? 'Day' : 'Days'}`);
     setBannerMessage(
-      `Our shop is closed for ${closureDays} ${
-        closureDays === 1 ? 'day' : 'days'
-      }. We will reopen on ${reopenDateFormatted}. Online orders placed now will be processed as soon as we reopen!`
+      'We are currently not processing any online orders, Please revisit our website after a few business days.'
     );
   };
 
@@ -133,13 +130,16 @@ export default function StoreClosureScreen({ navigation }) {
     try {
       const payload = {
         isClosed,
+        deliveryOrdersClosed: isClosed || !allowOrders,
         closureDays,
         startDate,
         reopenDate,
         reopenDateFormatted,
-        bannerTitle: bannerTitle.trim() || `Shop Temporarily Closed for ${closureDays} Days`,
-        bannerMessage: bannerMessage.trim(),
-        allowOrders,
+        bannerTitle: bannerTitle.trim() || 'Online Order Processing Paused',
+        bannerMessage:
+          bannerMessage.trim() ||
+          'We are currently not processing any online orders, Please revisit our website after a few business days.',
+        allowOrders: !isClosed && allowOrders,
         showPopup,
         showTopBanner,
       };
@@ -147,10 +147,10 @@ export default function StoreClosureScreen({ navigation }) {
       const res = await updateShopStatus(payload);
       if (res && res.success) {
         Alert.alert(
-          isClosed ? '🔴 Banner Published!' : '🟢 Shop is Now Open!',
+          isClosed ? '🔴 Delivery Orders Closed!' : '🟢 Store is Open!',
           isClosed
-            ? `Shop is set to CLOSED for ${closureDays} days (Reopening on ${reopenDateFormatted}). The notification popup and top banner are now live on the website!`
-            : 'Store marked as OPEN. The closure banner has been removed from the website.'
+            ? `Delivery orders are CLOSED for ${closureDays} days (Reopening on ${reopenDateFormatted}). The website is now LOCKED to display only the single notice page: "We are currently not processing any online orders, Please revisit our website after a few business days."`
+            : 'Store marked as OPEN. The single closure page is removed, and the full website catalog and checkout are live for customers.'
         );
       } else {
         Alert.alert('Notice', 'Settings saved to cloud database successfully.');
@@ -165,8 +165,8 @@ export default function StoreClosureScreen({ navigation }) {
   // Instant Reopen Shop
   const handleInstantReopen = () => {
     Alert.alert(
-      'Reopen Shop Now?',
-      'This will immediately remove the closure banner and notification popup from the website.',
+      'Reopen Online Delivery Orders?',
+      'This will immediately unlock the entire website so visitors can view products, access the cart, and place orders.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -175,9 +175,15 @@ export default function StoreClosureScreen({ navigation }) {
           onPress: async () => {
             setSaving(true);
             try {
-              await updateShopStatus({ isClosed: false });
+              await updateShopStatus({
+                isClosed: false,
+                deliveryOrdersClosed: false,
+                allowOrders: true,
+              });
               setIsClosed(false);
-              Alert.alert('🟢 Success', 'Shop is now OPEN. The banner has been removed from the website.');
+              setDeliveryOrdersClosed(false);
+              setAllowOrders(true);
+              Alert.alert('🟢 Success', 'Online delivery orders reopened! The entire website is now accessible.');
             } catch (e) {
               Alert.alert('Error', 'Failed to reopen shop: ' + e.message);
             } finally {
@@ -252,13 +258,13 @@ export default function StoreClosureScreen({ navigation }) {
                   color={isClosed ? colors.red : colors.navy}
                 />
                 <Text style={styles.cardTitle}>
-                  {isClosed ? 'Shop is Currently CLOSED' : 'Shop is Currently OPEN'}
+                  {isClosed ? 'Delivery Orders: CLOSED (Website Locked)' : 'Delivery Orders: OPEN & ACCEPTING'}
                 </Text>
               </View>
               <Text style={styles.cardSubtitle}>
                 {isClosed
-                  ? 'Active banner & popup alert are visible to all visitors on the website.'
-                  : 'Enable this to automatically display the 2-day closure banner and popup.'}
+                  ? 'Website is locked to display ONLY the single notice page: "We are currently not processing any online orders, Please revisit our website after a few business days."'
+                  : 'Full website is accessible. Customers can browse uniforms, schools, cart, and place online delivery orders.'}
               </Text>
             </View>
             <Switch
@@ -448,42 +454,47 @@ export default function StoreClosureScreen({ navigation }) {
             <Text style={styles.cardTitle}>Live Website Customer Preview</Text>
           </View>
           <Text style={styles.cardSubtitle}>
-            How this will look on bsmartdresses.com right now:
+            {isClosed
+              ? 'Current Live View: Single Page Only (Entire Site Locked)'
+              : 'Current Live View: Full Website Active'}
           </Text>
 
-          {/* Top Banner Preview */}
-          <Text style={[styles.previewSubLabel, { marginTop: spacing.sm }]}>1. Top Announcement Bar:</Text>
-          <View style={styles.previewTopBanner}>
-            <View style={styles.previewBannerBadge}>
-              <Ionicons name="alert-circle" size={14} color="#FACC15" />
-              <Text style={styles.previewBannerBadgeText}>NOTICE</Text>
-            </View>
-            <Text style={styles.previewTopBannerText} numberOfLines={2}>
-              {bannerTitle} — Reopening on {reopenDateFormatted}
-            </Text>
-          </View>
+          {isClosed ? (
+            <View style={styles.previewSinglePageBox}>
+              <View style={styles.previewSinglePageHeader}>
+                <Ionicons name="lock-closed" size={14} color="#B91C1C" />
+                <Text style={styles.previewSinglePageHeaderTag}>ONLY THIS PAGE IS SHOWN TO CUSTOMERS</Text>
+              </View>
 
-          {/* Modal Popup Preview */}
-          <Text style={[styles.previewSubLabel, { marginTop: spacing.md }]}>2. Visitor Popup Modal:</Text>
-          <View style={styles.previewPopupBox}>
-            <View style={styles.previewPopupHeader}>
-              <View style={styles.previewIconCircle}>
-                <Ionicons name="calendar" size={18} color="#991B1B" />
+              <View style={styles.previewMandatoryMessageBox}>
+                <Ionicons name="alert-circle" size={22} color="#991B1B" />
+                <Text style={styles.previewMandatoryMessageText}>
+                  "We are currently not processing any online orders, Please revisit our website after a few business days."
+                </Text>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.previewPopupTitle}>{bannerTitle}</Text>
-                <View style={styles.previewDatePill}>
-                  <Text style={styles.previewDatePillText}>📅 Reopening: {reopenDateFormatted}</Text>
-                </View>
+
+              <View style={styles.previewReopenInfo}>
+                <Ionicons name="calendar-outline" size={14} color="#881337" />
+                <Text style={styles.previewReopenText}>
+                  Expected Reopening: <Text style={{ fontWeight: '800' }}>{reopenDateFormatted}</Text>
+                </Text>
               </View>
+
+              <Text style={styles.previewSinglePageNote}>
+                🔒 The rest of the site (uniform catalog, school pages, search, cart, checkout) is hidden from visitors while delivery orders are closed.
+              </Text>
             </View>
-            <Text style={styles.previewPopupBody}>{bannerMessage}</Text>
-            <View style={styles.previewBtnBox}>
-              <View style={styles.previewMockBtn}>
-                <Text style={styles.previewMockBtnText}>Got It, Continue Browsing</Text>
+          ) : (
+            <View style={styles.previewOpenBox}>
+              <View style={styles.previewOpenBadge}>
+                <Ionicons name="checkmark-circle" size={16} color="#16A34A" />
+                <Text style={styles.previewOpenBadgeText}>FULL WEBSITE IS ACCESSIBLE</Text>
               </View>
+              <Text style={styles.previewOpenText}>
+                Customers can view the home page, school uniforms, add to cart, and place orders normally.
+              </Text>
             </View>
-          </View>
+          )}
         </View>
 
         {/* SAVE & PUBLISH ACTION BUTTONS */}
@@ -819,102 +830,85 @@ const styles = StyleSheet.create({
     marginTop: 2,
     lineHeight: 15,
   },
-  previewSubLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.textMuted,
-    textTransform: 'uppercase',
-  },
-  previewTopBanner: {
-    backgroundColor: '#881337',
-    borderRadius: radii.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginTop: 4,
-  },
-  previewBannerBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#701A75',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: radii.xs,
-    gap: 3,
-  },
-  previewBannerBadgeText: {
-    color: '#FACC15',
-    fontSize: 9,
-    fontWeight: '900',
-  },
-  previewTopBannerText: {
-    color: '#FEF08A',
-    fontSize: 12,
-    fontWeight: '700',
-    flex: 1,
-  },
-  previewPopupBox: {
+  previewSinglePageBox: {
     backgroundColor: '#FEF2F2',
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: '#FECDD3',
     borderRadius: radii.md,
     padding: spacing.md,
-    marginTop: 4,
+    gap: spacing.sm,
   },
-  previewPopupHeader: {
+  previewSinglePageHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FEE2E2',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: radii.xs,
+    alignSelf: 'flex-start',
+  },
+  previewSinglePageHeaderTag: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#991B1B',
+    letterSpacing: 0.3,
+  },
+  previewMandatoryMessageBox: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#FCD34D',
+    borderRadius: radii.sm,
+    padding: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    marginBottom: spacing.xs,
   },
-  previewIconCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#FEE2E2',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  previewPopupTitle: {
-    fontSize: 14,
+  previewMandatoryMessageText: {
+    fontSize: 13,
     fontWeight: '800',
-    color: '#991B1B',
+    color: '#7F1D1D',
+    flex: 1,
+    lineHeight: 18,
   },
-  previewDatePill: {
-    backgroundColor: '#FEE2E2',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: radii.xs,
-    marginTop: 2,
+  previewReopenInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 4,
   },
-  previewDatePillText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#B91C1C',
-  },
-  previewPopupBody: {
+  previewReopenText: {
     fontSize: 12,
     color: '#475569',
-    lineHeight: 17,
-    marginTop: 6,
   },
-  previewBtnBox: {
-    marginTop: spacing.md,
-    alignItems: 'flex-end',
-  },
-  previewMockBtn: {
-    backgroundColor: '#991B1B',
-    paddingHorizontal: spacing.md,
-    paddingVertical: 6,
-    borderRadius: radii.sm,
-  },
-  previewMockBtnText: {
-    color: colors.white,
+  previewSinglePageNote: {
     fontSize: 11,
-    fontWeight: '700',
+    color: '#64748B',
+    lineHeight: 16,
+    paddingHorizontal: 4,
+  },
+  previewOpenBox: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1.5,
+    borderColor: '#BBF7D0',
+    borderRadius: radii.md,
+    padding: spacing.md,
+    gap: 6,
+  },
+  previewOpenBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  previewOpenBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#15803D',
+  },
+  previewOpenText: {
+    fontSize: 12,
+    color: '#166534',
+    lineHeight: 16,
   },
   actionSection: {
     gap: spacing.md,

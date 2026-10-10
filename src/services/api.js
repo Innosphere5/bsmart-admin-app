@@ -12,6 +12,16 @@ const LOCAL_PORT = 5000;
 const CURRENT_LOCAL_IP = '10.53.190.144';
 
 /**
+/**
+ * Helper to determine if an IP is loopback or emulator alias that cannot reach host port 5000
+ */
+function isExcludedIp(ip) {
+  if (!ip || typeof ip !== 'string') return true;
+  const clean = ip.trim();
+  return ['localhost', '127.0.0.1', '10.0.2.2', '0.0.0.0'].includes(clean);
+}
+
+/**
  * Dynamically extract host IP of the developer's computer.
  * Works across iOS Simulator, iOS physical device (Expo Go), Android Emulator, and physical phones.
  */
@@ -19,7 +29,7 @@ export function getDevHostIp() {
   // 1. Check explicit EXPO_PUBLIC_LOCAL_IP environment variable
   if (process.env.EXPO_PUBLIC_LOCAL_IP && typeof process.env.EXPO_PUBLIC_LOCAL_IP === 'string') {
     const rawIp = process.env.EXPO_PUBLIC_LOCAL_IP.trim();
-    if (rawIp && rawIp !== 'localhost' && rawIp !== '127.0.0.1') {
+    if (!isExcludedIp(rawIp)) {
       return rawIp;
     }
   }
@@ -29,7 +39,7 @@ export function getDevHostIp() {
     const scriptURL = NativeModules?.SourceCode?.scriptURL;
     if (scriptURL && typeof scriptURL === 'string') {
       const match = scriptURL.match(/^https?:\/\/([^:/]+)/);
-      if (match && match[1] && match[1] !== 'localhost' && match[1] !== '127.0.0.1') {
+      if (match && match[1] && !isExcludedIp(match[1])) {
         return match[1];
       }
     }
@@ -42,7 +52,7 @@ export function getDevHostIp() {
                     Constants.manifest2?.extra?.expoGo?.debuggerHost;
     if (hostUri && typeof hostUri === 'string') {
       const ip = hostUri.split(':')[0];
-      if (ip && ip !== 'localhost' && ip !== '127.0.0.1') {
+      if (ip && !isExcludedIp(ip)) {
         return ip;
       }
     }
@@ -53,7 +63,7 @@ export function getDevHostIp() {
     const uri = Constants.linkingUri || Constants.experienceUrl;
     if (uri && typeof uri === 'string') {
       const match = uri.match(/:\/\/([^:/]+)/);
-      if (match && match[1] && match[1] !== 'localhost' && match[1] !== '127.0.0.1') {
+      if (match && match[1] && !isExcludedIp(match[1])) {
         return match[1];
       }
     }
@@ -67,48 +77,37 @@ export function getDevHostIp() {
  * Dynamically resolve backend API base URL
  */
 const getApiBaseUrl = () => {
-  // In development mode (__DEV__ === true), prioritize local machine backend
-  if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    // Web browser running on developer machine
-    if (Platform.OS === 'web') {
-      if (typeof window !== 'undefined' && window.location?.hostname && !['localhost', '127.0.0.1'].includes(window.location.hostname)) {
-        return PRODUCTION_API_URL;
-      }
-      return `http://localhost:${LOCAL_PORT}`;
-    }
-
-    // Android emulator special localhost alias
-    if (Platform.OS === 'android') {
-      const hostIp = getDevHostIp();
-      // If hostIp was dynamically discovered from Metro/Expo, use it so real devices work
-      if (hostIp && hostIp !== CURRENT_LOCAL_IP) {
-        return `http://${hostIp}:${LOCAL_PORT}`;
-      }
-      // Check if running on real device vs emulator
-      const isEmulator = !Constants.isDevice;
-      if (isEmulator) {
-        return `http://10.0.2.2:${LOCAL_PORT}`;
-      }
-      return `http://${hostIp}:${LOCAL_PORT}`;
-    }
-
-    // iOS (Simulator or physical device with Expo Go)
-    const hostIp = getDevHostIp();
-    return `http://${hostIp}:${LOCAL_PORT}`;
-  }
-
-  // Explicit environment variable override
+  // 1. Explicit environment variable override ALWAYS takes highest priority (unless 10.0.2.2)
   const envUrl = process.env.EXPO_PUBLIC_API_URL || process.env.EXPO_PUBLIC_BACKEND_URL;
-  if (envUrl && typeof envUrl === 'string' && envUrl.trim() !== '') {
+  if (envUrl && typeof envUrl === 'string' && envUrl.trim() !== '' && !envUrl.includes('10.0.2.2')) {
     return envUrl.trim().replace(/\/+$/, '');
   }
 
-  // Production release builds (EAS build, standalone APK/bundle, deployed web)
+  // 2. Production release builds (EAS build, standalone APK/bundle, deployed web)
   if (typeof __DEV__ !== 'undefined' && !__DEV__) {
     return PRODUCTION_API_URL;
   }
 
-  return `http://${getDevHostIp()}:${LOCAL_PORT}`;
+  // 3. Web browser running on developer machine
+  if (Platform.OS === 'web') {
+    if (typeof window !== 'undefined' && window.location?.hostname && !['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+      return PRODUCTION_API_URL;
+    }
+    return `http://localhost:${LOCAL_PORT}`;
+  }
+
+  // 4. For mobile devices (Android & iOS - both physical devices & emulators):
+  // Prioritize active LAN IP of developer machine so real devices and emulators connect reliably
+  const hostIp = getDevHostIp();
+  if (hostIp && !isExcludedIp(hostIp)) {
+    return `http://${hostIp}:${LOCAL_PORT}`;
+  }
+
+  if (CURRENT_LOCAL_IP) {
+    return `http://${CURRENT_LOCAL_IP}:${LOCAL_PORT}`;
+  }
+
+  return `http://localhost:${LOCAL_PORT}`;
 };
 
 export const API_BASE_URL = getApiBaseUrl();
@@ -249,116 +248,340 @@ export async function deleteProduct(id) {
 }
 
 /**
- * Fetch all products from backend
+ * Compute stock status according to business rules:
+ * - Stock <= 0 or inStock === false -> 'Out of Stock'
+ * - Stock === 1 -> 'Low Stock'
+ * - Stock >= 2 -> 'In Stock'
  */
-export async function fetchProducts() {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/products`);
-    if (!res.ok) return [];
-    const data = await res.json();
-    if (data.success) {
-      return data.products;
-    }
-    return [];
-  } catch (error) {
-    console.error('Error fetching products:', error.message || error);
-    return [];
+export function computeStockStatus(stockQuantity, inStock = true) {
+  const stock = Number(stockQuantity ?? 0);
+  if (stock <= 0 || inStock === false) {
+    return 'Out of Stock';
   }
+  if (stock === 1) {
+    return 'Low Stock';
+  }
+  return 'In Stock';
 }
 
 /**
- * Fetch all orders with optional status and search filter
+ * Helper to get all candidate backend base URLs (current, local, LAN)
+ * Prioritizes host Mac LAN IP (10.53.190.144:5000) so real devices and emulators connect reliably
+ */
+export function getCandidateBaseUrls() {
+  const urls = [];
+  
+  // 1. Direct machine LAN IP (Tested working across physical devices & emulators)
+  if (CURRENT_LOCAL_IP) {
+    const lanUrl = `http://${CURRENT_LOCAL_IP}:${LOCAL_PORT}`;
+    if (!urls.includes(lanUrl)) urls.push(lanUrl);
+  }
+
+  // 2. Active configured API_BASE_URL if not an emulator alias
+  if (API_BASE_URL && !API_BASE_URL.includes('10.0.2.2')) {
+    if (!urls.includes(API_BASE_URL)) urls.push(API_BASE_URL);
+  }
+
+  // 3. Dynamically detected host IP
+  const hostIp = getDevHostIp();
+  if (hostIp && !isExcludedIp(hostIp)) {
+    const detectedLan = `http://${hostIp}:${LOCAL_PORT}`;
+    if (!urls.includes(detectedLan)) urls.push(detectedLan);
+  }
+
+  // 4. Localhost for Web / iOS Simulator
+  if (Platform.OS === 'web' || Platform.OS === 'ios') {
+    if (!urls.includes(`http://localhost:${LOCAL_PORT}`)) urls.push(`http://localhost:${LOCAL_PORT}`);
+  }
+
+  // 5. Remote Production Render Backend
+  if (!urls.includes(PRODUCTION_API_URL)) urls.push(PRODUCTION_API_URL);
+
+  // 6. Last resort fallback for Android emulator (only if adb port forwarding is active)
+  if (Platform.OS === 'android') {
+    const emuUrl = `http://10.0.2.2:${LOCAL_PORT}`;
+    if (!urls.includes(emuUrl)) urls.push(emuUrl);
+  }
+
+  return urls;
+}
+
+/**
+ * Fetch all products from backend with multi-candidate network retry and direct Supabase fallback
+ */
+export async function fetchProducts() {
+  const candidateUrls = getCandidateBaseUrls();
+
+  // 1. Try candidate backend endpoints
+  for (const baseUrl of candidateUrls) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3500);
+      const res = await fetch(`${baseUrl}/api/products`, { signal: controller.signal });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.products)) {
+          return data.products.map((p) => ({
+            ...p,
+            stockStatus: p.stockStatus || computeStockStatus(p.stockQuantity, p.inStock),
+          }));
+        }
+      }
+    } catch (e) {
+      // Continue to next candidate URL
+    }
+  }
+
+  // 2. Direct Supabase REST Fallback (ensures app works even when Express server is unreachable)
+  try {
+    const supabaseUrl = `${SUPABASE_REST_URL}/rest/v1/products?select=*&order=created_at.desc`;
+    const res = await fetch(supabaseUrl, {
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+    });
+    if (res.ok) {
+      const dbProducts = await res.json();
+      if (Array.isArray(dbProducts)) {
+        return dbProducts.map((row) => {
+          const stock = Number(row.stock_quantity ?? 50);
+          const isInStock = stock > 0 && row.in_stock !== false;
+          const rawImages = row.images ? (typeof row.images === 'string' ? JSON.parse(row.images) : row.images) : [];
+          const rawImage = row.image_src || '';
+          return {
+            id: row.id,
+            name: row.name,
+            category: row.category || 'General',
+            school: row.school || '',
+            applicableClass: row.applicable_class || 'All Classes',
+            description: row.description || '',
+            details: row.description || '',
+            basePrice: Number(row.base_price || 500),
+            imageSrc: rawImage,
+            images: (Array.isArray(rawImages) && rawImages.length > 0 ? rawImages : [rawImage]),
+            sizes: row.sizes ? (typeof row.sizes === 'string' ? JSON.parse(row.sizes) : row.sizes) : ['28', '30', '32', '34', '36'],
+            sizesText: row.sizes_text || 'Multiple Sizes',
+            sizePrices: row.size_prices ? (typeof row.size_prices === 'string' ? JSON.parse(row.size_prices) : row.size_prices) : {},
+            sizeStocks: row.size_stocks ? (typeof row.size_stocks === 'string' ? JSON.parse(row.size_stocks) : row.size_stocks) : {},
+            inStock: isInStock,
+            stockQuantity: stock,
+            stockStatus: computeStockStatus(stock, isInStock),
+            createdAt: row.created_at,
+          };
+        });
+      }
+    }
+  } catch (supabaseErr) {
+    console.warn('Direct Supabase products fetch notice:', supabaseErr.message);
+  }
+
+  return [];
+}
+
+/**
+ * Fetch all orders with optional status and search filter with multi-candidate network retry and Supabase fallback
  */
 export async function fetchOrders(status = 'All', search = '') {
-  try {
-    const params = new URLSearchParams();
-    if (status && status !== 'All') params.append('status', status);
-    if (search) params.append('search', search);
+  const candidateUrls = getCandidateBaseUrls();
+  const params = new URLSearchParams();
+  if (status && status !== 'All') params.append('status', status);
+  if (search) params.append('search', search);
+  const queryString = params.toString() ? `?${params.toString()}` : '';
 
-    const url = `${API_BASE_URL}/api/orders?${params.toString()}`;
-    const res = await fetch(url);
-    if (!res.ok) return [];
-    const data = await res.json();
-    if (data.success) {
-      return data.orders || [];
+  // 1. Try candidate backend endpoints
+  for (const baseUrl of candidateUrls) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3500);
+      const res = await fetch(`${baseUrl}/api/orders${queryString}`, { signal: controller.signal });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.orders)) {
+          return data.orders;
+        }
+      }
+    } catch (e) {
+      // Continue to next candidate URL
     }
-    return [];
-  } catch (error) {
-    console.error('Error fetching orders:', error.message || error);
-    return [];
   }
+
+  // 2. Direct Supabase REST Fallback
+  try {
+    let supabaseUrl = `${SUPABASE_REST_URL}/rest/v1/orders?select=*&order=created_at.desc`;
+    if (status && status !== 'All') {
+      supabaseUrl += `&status=eq.${encodeURIComponent(status)}`;
+    }
+    const res = await fetch(supabaseUrl, {
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+    });
+    if (res.ok) {
+      const dbOrders = await res.json();
+      if (Array.isArray(dbOrders)) {
+        let orders = dbOrders.map((row) => ({
+          id: row.id,
+          orderId: row.id,
+          orderNumber: row.order_number || row.id,
+          customerName: row.customer_name || 'Customer',
+          customerPhone: row.customer_phone || '',
+          customerAddress: row.customer_address || '',
+          city: row.city || 'Bathinda',
+          pinCode: row.pincode || row.pin_code || '151001',
+          school: row.school || '',
+          status: row.status || 'Pending',
+          items: typeof row.items === 'string' ? JSON.parse(row.items) : (row.items || []),
+          totalAmount: Number(row.total_amount || 0),
+          totalItems: Number(row.total_items || 0),
+          deliveryTime: row.delivery_time || '',
+          declineReason: row.decline_reason || '',
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        }));
+
+        if (search) {
+          const q = search.toLowerCase();
+          orders = orders.filter((o) =>
+            (o.customerName && o.customerName.toLowerCase().includes(q)) ||
+            (o.id && o.id.toLowerCase().includes(q)) ||
+            (o.customerPhone && o.customerPhone.includes(q))
+          );
+        }
+
+        return orders;
+      }
+    }
+  } catch (supabaseErr) {
+    console.warn('Direct Supabase orders fetch notice:', supabaseErr.message);
+  }
+
+  return [];
 }
 
 /**
  * Fetch single order by ID
  */
 export async function fetchOrderById(id) {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/orders/${id}`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data.success) {
-      return data.order;
-    }
-    return null;
-  } catch (error) {
-    console.error(`Error fetching order ${id}:`, error.message || error);
-    return null;
+  const candidateUrls = getCandidateBaseUrls();
+
+  for (const baseUrl of candidateUrls) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3500);
+      const res = await fetch(`${baseUrl}/api/orders/${encodeURIComponent(id)}`, { signal: controller.signal });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.order) {
+          return data.order;
+        }
+      }
+    } catch (e) {}
   }
+
+  // Direct Supabase REST fallback
+  try {
+    const res = await fetch(`${SUPABASE_REST_URL}/rest/v1/orders?id=eq.${encodeURIComponent(id)}&select=*`, {
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        const row = data[0];
+        return {
+          id: row.id,
+          orderId: row.id,
+          orderNumber: row.order_number || row.id,
+          customerName: row.customer_name || 'Customer',
+          customerPhone: row.customer_phone || '',
+          customerAddress: row.customer_address || '',
+          city: row.city || 'Bathinda',
+          pinCode: row.pincode || row.pin_code || '151001',
+          school: row.school || '',
+          status: row.status || 'Pending',
+          items: typeof row.items === 'string' ? JSON.parse(row.items) : (row.items || []),
+          totalAmount: Number(row.total_amount || 0),
+          totalItems: Number(row.total_items || 0),
+          deliveryTime: row.delivery_time || '',
+          declineReason: row.decline_reason || '',
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        };
+      }
+    }
+  } catch (e) {}
+
+  return null;
 }
 
 /**
  * Update order status (Accept with Delivery Time or Decline with Reason)
  */
 export async function updateOrderStatus(id, statusPayload) {
+  const candidateUrls = getCandidateBaseUrls();
+  let lastError = null;
+
+  for (const baseUrl of candidateUrls) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
+      const res = await fetch(`${baseUrl}/api/orders/${encodeURIComponent(id)}/status`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify(statusPayload),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const data = await res.json();
+        return data.order;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  // Direct Supabase REST fallback
   try {
-    const res = await fetch(`${API_BASE_URL}/api/orders/${id}/status`, {
-      method: 'PUT',
+    const updateBody = {
+      status: statusPayload.status,
+      updated_at: new Date().toISOString(),
+    };
+    if (statusPayload.deliveryTime) updateBody.delivery_time = statusPayload.deliveryTime;
+    if (statusPayload.declineReason) updateBody.decline_reason = statusPayload.declineReason;
+
+    const res = await fetch(`${SUPABASE_REST_URL}/rest/v1/orders?id=eq.${encodeURIComponent(id)}`, {
+      method: 'PATCH',
       headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
         'Content-Type': 'application/json',
-        'Accept': 'application/json',
+        Prefer: 'return=representation',
       },
-      body: JSON.stringify(statusPayload),
+      body: JSON.stringify(updateBody),
     });
 
-    if (!res.ok) {
-      const errorText = await res.text();
-      throw new Error(`Failed to update order status: ${errorText}`);
+    if (res.ok) {
+      const data = await res.json();
+      return Array.isArray(data) && data.length > 0 ? data[0] : { id, ...statusPayload };
     }
+  } catch (e) {}
 
-    const data = await res.json();
-    return data.order;
-  } catch (error) {
-    console.error(`Error updating order ${id} status:`, error.message || error);
-    throw error;
-  }
-}
-
-/**
- * Helper to get all candidate backend base URLs (current, local, LAN)
- */
-function getCandidateBaseUrls() {
-  const urls = [];
-  if (API_BASE_URL) urls.push(API_BASE_URL);
-
-  const hostIp = getDevHostIp();
-  if (hostIp) {
-    const lanUrl = `http://${hostIp}:${LOCAL_PORT}`;
-    if (!urls.includes(lanUrl)) urls.push(lanUrl);
-  }
-
-  const fallbackLan = `http://${CURRENT_LOCAL_IP}:${LOCAL_PORT}`;
-  if (!urls.includes(fallbackLan)) urls.push(fallbackLan);
-
-  if (Platform.OS === 'web' || Platform.OS === 'ios') {
-    if (!urls.includes(`http://localhost:${LOCAL_PORT}`)) urls.push(`http://localhost:${LOCAL_PORT}`);
-  }
-  if (Platform.OS === 'android') {
-    if (!urls.includes(`http://10.0.2.2:${LOCAL_PORT}`)) urls.push(`http://10.0.2.2:${LOCAL_PORT}`);
-  }
-  if (!urls.includes(PRODUCTION_API_URL)) urls.push(PRODUCTION_API_URL);
-
-  return urls;
+  throw lastError || new Error(`Failed to update order status for ${id}`);
 }
 
 /**
@@ -1061,12 +1284,13 @@ export function getDefaultShopStatus() {
 
   return {
     isClosed: false,
+    deliveryOrdersClosed: false,
     closureDays: 2,
     startDate: now.toISOString(),
     reopenDate: reopen.toISOString(),
     reopenDateFormatted: formatted,
     bannerTitle: 'Shop Temporarily Closed for 2 Days',
-    bannerMessage: `Our shop is closed for 2 days. We will reopen on ${formatted}. Online orders placed now will be processed as soon as we reopen!`,
+    bannerMessage: `We are currently not processing any online orders, Please revisit our website after a few business days.`,
     allowOrders: true,
     showPopup: true,
     showTopBanner: true,
